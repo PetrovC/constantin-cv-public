@@ -43,6 +43,9 @@ a {
 
 a:focus-visible,
 button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 3px solid rgba(31, 120, 105, 0.42);
   outline-offset: 3px;
@@ -842,37 +845,117 @@ h4 {
   text-transform: uppercase;
 }
 
-.download-placeholder {
+.cv-request-section__intro {
   display: grid;
-  justify-items: start;
   gap: 1rem;
+}
+
+.cv-request-section__intro .section-kicker {
+  margin-bottom: -0.15rem;
+}
+
+.cv-request-form {
+  display: grid;
+  gap: 1.2rem;
   border: 1px solid rgba(23, 32, 51, 0.1);
   border-radius: 8px;
-  padding: 1.15rem;
+  padding: 1.2rem;
   background: var(--surface);
   box-shadow: 0 10px 22px rgba(23, 32, 51, 0.055);
   transition:
     border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
+    box-shadow 180ms ease;
 }
 
-.download-placeholder__badge {
-  display: inline-flex;
-  border-radius: 8px;
-  padding: 0.35rem 0.55rem;
-  background: var(--surface-soft);
-  color: var(--primary);
+.cv-request-form:focus-within {
+  border-color: rgba(31, 120, 105, 0.26);
+  box-shadow: 0 16px 32px rgba(23, 32, 51, 0.1);
+}
+
+.cv-request-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.cv-request-field {
+  display: grid;
+  gap: 0.42rem;
+  min-width: 0;
+}
+
+.cv-request-field--wide {
+  grid-column: 1 / -1;
+}
+
+.cv-request-field label {
+  color: var(--ink);
   font-size: 0.78rem;
   font-weight: 900;
   text-transform: uppercase;
 }
 
-.download-placeholder p {
+.cv-request-field input,
+.cv-request-field select,
+.cv-request-field textarea {
+  width: 100%;
+  min-height: 2.85rem;
+  border: 1px solid rgba(23, 32, 51, 0.14);
+  border-radius: 8px;
+  padding: 0.72rem 0.8rem;
+  background: #fbfcfb;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.4;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cv-request-field input::placeholder,
+.cv-request-field textarea::placeholder {
+  color: var(--quiet);
+}
+
+.cv-request-field input:focus-visible,
+.cv-request-field select:focus-visible,
+.cv-request-field textarea:focus-visible {
+  border-color: rgba(31, 120, 105, 0.42);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(31, 120, 105, 0.1);
+}
+
+.cv-request-field textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.cv-request-form__actions {
+  display: grid;
+  justify-items: start;
+  gap: 0.85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.cv-request-form__status {
+  display: grid;
+  gap: 0.25rem;
   margin: 0;
+  border: 1px solid rgba(31, 120, 105, 0.24);
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: var(--green-soft);
+  line-height: 1.5;
+}
+
+.cv-request-form__status strong {
+  color: var(--ink);
+}
+
+.cv-request-form__status span {
   color: var(--muted);
-  font-size: 1.04rem;
-  line-height: 1.7;
 }
 
 .contact-links {
@@ -977,7 +1060,6 @@ h4 {
   .education-item__content:hover,
   .learning-block:hover,
   .mission-card:hover,
-  .download-placeholder:hover,
   .contact-link:hover {
     border-color: rgba(31, 120, 105, 0.24);
     box-shadow: 0 16px 32px rgba(23, 32, 51, 0.1);
@@ -1095,7 +1177,8 @@ h4 {
   }
 
   .language-list,
-  .contact-links {
+  .contact-links,
+  .cv-request-form__grid {
     grid-template-columns: 1fr;
   }
 
@@ -1184,7 +1267,6 @@ h4 {
   .education-item__content:hover,
   .learning-block:hover,
   .mission-card:hover,
-  .download-placeholder:hover,
   .tag-list li:hover {
     transform: none;
   }
