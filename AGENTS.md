@@ -24,7 +24,7 @@ The goal is to build a clean, professional and evolutive system that can grow st
 - .NET for CV validation and artifact generation
 - YAML as the single source of truth
 - Playwright later for PDF generation from print pages
-- GitHub Actions later for PR checks and GitHub Pages deployment
+- GitHub Actions later for PR checks and GitHub Pages deployment 
 
 Do not introduce additional technologies, frameworks, databases, external services or infrastructure components unless explicitly requested.
 
