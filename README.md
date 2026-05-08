@@ -49,3 +49,11 @@ dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.cspro
 npm install
 npm run build --workspace apps/cv-web
 ```
+
+## Local Website URL
+
+The Astro website is configured for the GitHub Pages project path `/constantin-cv-public`. When running the web app locally, open:
+
+```txt
+http://localhost:4321/constantin-cv-public/
+```
