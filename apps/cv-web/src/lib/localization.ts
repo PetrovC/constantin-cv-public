@@ -8,6 +8,7 @@ export const uiText = {
     navProfile: 'Profil',
     navSkills: 'Competences',
     navExperience: 'Experience',
+    navCvRequest: 'CV',
     navContact: 'Contact',
     languageSelectionLabel: 'Selection de langue',
     switchLanguageLabel: 'Afficher la version',
@@ -17,7 +18,7 @@ export const uiText = {
       de: 'allemande'
     },
     heroAction: 'Voir le profil',
-    heroDownloadAction: 'PDF a venir',
+    heroDownloadAction: 'Demander mon CV',
     locationLabel: 'Localisation',
     linksTitle: 'Liens',
     summaryTitle: 'Profil',
@@ -44,10 +45,35 @@ export const uiText = {
     missionSingularTitle: 'Mission',
     missionsTitle: 'Missions',
     tagsTitle: 'Technologies',
-    downloadTitle: 'Telechargements',
-    downloadText:
-      'Les versions PDF professionnelles seront ajoutees plus tard depuis les pages imprimees.',
-    downloadPlaceholder: 'PDF a venir',
+    cvRequest: {
+      kicker: 'CV sur demande',
+      title: 'Demander mon CV',
+      intro:
+        'Les CV professionnels sont disponibles sur demande. Chaque demande sera examinee avant envoi lorsque le workflow sera actif.',
+      privacy:
+        'Cela evite de publier directement en ligne des documents prives ou des versions destinees a un echange approuve.',
+      fullNameLabel: 'Nom complet',
+      emailLabel: 'Email professionnel',
+      organizationLabel: 'Entreprise / organisation',
+      profileUrlLabel: 'URL LinkedIn ou site web',
+      cvTypeLabel: 'Type de CV demande',
+      cvTypeOptions: {
+        onePage: 'CV une page',
+        fullDeveloper: 'CV developpeur complet'
+      },
+      languageLabel: 'Langue demandee',
+      languageOptions: {
+        fr: 'Francais',
+        en: 'Anglais',
+        de: 'Allemand'
+      },
+      reasonLabel: 'Raison / contexte de la demande',
+      reasonPlaceholder: 'Recrutement, mission potentielle, entretien technique...',
+      submitLabel: 'Verifier la disponibilite',
+      unavailableTitle: 'Workflow bientot disponible',
+      unavailableMessage:
+        'La demande de CV n est pas encore active. Aucune donnee n a ete envoyee ni conservee.'
+    },
     contactTitle: 'Contact',
     contactAction: 'Me contacter',
     present: 'aujourd hui',
@@ -64,6 +90,7 @@ export const uiText = {
     navProfile: 'Profile',
     navSkills: 'Skills',
     navExperience: 'Experience',
+    navCvRequest: 'CV request',
     navContact: 'Contact',
     languageSelectionLabel: 'Language selection',
     switchLanguageLabel: 'Show the',
@@ -73,7 +100,7 @@ export const uiText = {
       de: 'German version'
     },
     heroAction: 'View profile',
-    heroDownloadAction: 'PDF coming soon',
+    heroDownloadAction: 'Request my CV',
     locationLabel: 'Location',
     linksTitle: 'Links',
     summaryTitle: 'Profile',
@@ -100,10 +127,35 @@ export const uiText = {
     missionSingularTitle: 'Mission',
     missionsTitle: 'Missions',
     tagsTitle: 'Technologies',
-    downloadTitle: 'Downloads',
-    downloadText:
-      'Professional PDF versions will be added later from dedicated print pages.',
-    downloadPlaceholder: 'PDF coming soon',
+    cvRequest: {
+      kicker: 'CV on request',
+      title: 'Request my CV',
+      intro:
+        'Professional CVs are available on request. Each request will be reviewed before anything is sent once the workflow is active.',
+      privacy:
+        'This avoids publishing private documents or approved-exchange versions directly online.',
+      fullNameLabel: 'Full name',
+      emailLabel: 'Professional email',
+      organizationLabel: 'Company / organization',
+      profileUrlLabel: 'LinkedIn or website URL',
+      cvTypeLabel: 'Requested CV type',
+      cvTypeOptions: {
+        onePage: 'One-page CV',
+        fullDeveloper: 'Full developer CV'
+      },
+      languageLabel: 'Requested language',
+      languageOptions: {
+        fr: 'French',
+        en: 'English',
+        de: 'German'
+      },
+      reasonLabel: 'Reason / context of request',
+      reasonPlaceholder: 'Recruiting, potential mission, technical interview...',
+      submitLabel: 'Check availability',
+      unavailableTitle: 'Workflow coming soon',
+      unavailableMessage:
+        'The CV request workflow is not active yet. No data has been sent or stored.'
+    },
     contactTitle: 'Contact',
     contactAction: 'Contact me',
     present: 'present',
@@ -120,6 +172,7 @@ export const uiText = {
     navProfile: 'Profil',
     navSkills: 'Kompetenzen',
     navExperience: 'Erfahrung',
+    navCvRequest: 'CV anfragen',
     navContact: 'Kontakt',
     languageSelectionLabel: 'Sprachauswahl',
     switchLanguageLabel: 'Version anzeigen:',
@@ -129,7 +182,7 @@ export const uiText = {
       de: 'Deutsch'
     },
     heroAction: 'Profil ansehen',
-    heroDownloadAction: 'PDF folgt',
+    heroDownloadAction: 'CV anfragen',
     locationLabel: 'Standort',
     linksTitle: 'Links',
     summaryTitle: 'Profil',
@@ -156,10 +209,35 @@ export const uiText = {
     missionSingularTitle: 'Mission',
     missionsTitle: 'Missionen',
     tagsTitle: 'Technologien',
-    downloadTitle: 'Downloads',
-    downloadText:
-      'Professionelle PDF-Versionen werden spaeter aus eigenen Druckseiten erzeugt.',
-    downloadPlaceholder: 'PDF folgt',
+    cvRequest: {
+      kicker: 'CV auf Anfrage',
+      title: 'CV anfragen',
+      intro:
+        'Professionelle CVs sind auf Anfrage verfuegbar. Jede Anfrage wird geprueft, bevor etwas gesendet wird, sobald der Workflow aktiv ist.',
+      privacy:
+        'So werden private Dokumente oder Versionen fuer freigegebene Austausche nicht direkt online veroeffentlicht.',
+      fullNameLabel: 'Vollstaendiger Name',
+      emailLabel: 'Berufliche E-Mail',
+      organizationLabel: 'Unternehmen / Organisation',
+      profileUrlLabel: 'LinkedIn- oder Website-URL',
+      cvTypeLabel: 'Gewuenschter CV-Typ',
+      cvTypeOptions: {
+        onePage: 'Einseitiger CV',
+        fullDeveloper: 'Vollstaendiger Entwickler-CV'
+      },
+      languageLabel: 'Gewuenschte Sprache',
+      languageOptions: {
+        fr: 'Franzoesisch',
+        en: 'Englisch',
+        de: 'Deutsch'
+      },
+      reasonLabel: 'Grund / Kontext der Anfrage',
+      reasonPlaceholder: 'Recruiting, moegliche Mission, technisches Gespraech...',
+      submitLabel: 'Verfuegbarkeit pruefen',
+      unavailableTitle: 'Workflow bald verfuegbar',
+      unavailableMessage:
+        'Der CV-Anfrageworkflow ist noch nicht aktiv. Es wurden keine Daten gesendet oder gespeichert.'
+    },
     contactTitle: 'Kontakt',
     contactAction: 'Kontakt aufnehmen',
     present: 'heute',
@@ -178,6 +256,7 @@ interface LocalizedText {
   navProfile: string;
   navSkills: string;
   navExperience: string;
+  navCvRequest: string;
   navContact: string;
   languageSelectionLabel: string;
   switchLanguageLabel: string;
@@ -197,9 +276,7 @@ interface LocalizedText {
   missionSingularTitle: string;
   missionsTitle: string;
   tagsTitle: string;
-  downloadTitle: string;
-  downloadText: string;
-  downloadPlaceholder: string;
+  cvRequest: LocalizedCvRequest;
   contactTitle: string;
   contactAction: string;
   present: string;
@@ -213,6 +290,29 @@ interface LocalizedText {
 interface LocalizedValueCard {
   title: string;
   text: string;
+}
+
+interface LocalizedCvRequest {
+  kicker: string;
+  title: string;
+  intro: string;
+  privacy: string;
+  fullNameLabel: string;
+  emailLabel: string;
+  organizationLabel: string;
+  profileUrlLabel: string;
+  cvTypeLabel: string;
+  cvTypeOptions: {
+    onePage: string;
+    fullDeveloper: string;
+  };
+  languageLabel: string;
+  languageOptions: Record<SupportedLanguage, string>;
+  reasonLabel: string;
+  reasonPlaceholder: string;
+  submitLabel: string;
+  unavailableTitle: string;
+  unavailableMessage: string;
 }
 
 export function formatPeriod(period: GeneratedCvPeriod, language: SupportedLanguage): string {

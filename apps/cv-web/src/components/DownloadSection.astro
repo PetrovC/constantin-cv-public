@@ -8,16 +8,110 @@ interface Props {
 
 const { lang } = Astro.props as Props;
 const text = uiText[lang];
+const request = text.cvRequest;
+const cvTypeOptions = [
+  { value: 'one-page', label: request.cvTypeOptions.onePage },
+  { value: 'full-dev', label: request.cvTypeOptions.fullDeveloper }
+];
+const languageOptions = [
+  { value: 'fr', label: request.languageOptions.fr },
+  { value: 'en', label: request.languageOptions.en },
+  { value: 'de', label: request.languageOptions.de }
+] satisfies { value: SupportedLanguage; label: string }[];
 ---
 
-<section id="download" class="content-section two-column-section" aria-labelledby="download-title">
-  <div>
-    <p class="section-kicker">{text.downloadTitle}</p>
-    <h2 id="download-title">{text.downloadTitle}</h2>
+<section id="cv-request" class="content-section two-column-section cv-request-section" aria-labelledby="cv-request-title">
+  <div class="cv-request-section__intro">
+    <p class="section-kicker">{request.kicker}</p>
+    <h2 id="cv-request-title">{request.title}</h2>
+    <p>{request.intro}</p>
+    <p id={`cv-request-privacy-${lang}`}>{request.privacy}</p>
   </div>
-  <div class="download-placeholder">
-    <span class="download-placeholder__badge">{text.downloadPlaceholder}</span>
-    <p>{text.downloadText}</p>
-    <span class="button button--secondary" aria-disabled="true">{text.downloadTitle}</span>
-  </div>
+
+  <form class="cv-request-form" data-cv-request-form aria-describedby={`cv-request-privacy-${lang} cv-request-status-${lang}`}>
+    <div class="cv-request-form__grid">
+      <div class="cv-request-field">
+        <label for={`cv-request-full-name-${lang}`}>{request.fullNameLabel}</label>
+        <input id={`cv-request-full-name-${lang}`} type="text" autocomplete="name" required />
+      </div>
+
+      <div class="cv-request-field">
+        <label for={`cv-request-email-${lang}`}>{request.emailLabel}</label>
+        <input id={`cv-request-email-${lang}`} type="email" autocomplete="email" inputmode="email" required />
+      </div>
+
+      <div class="cv-request-field">
+        <label for={`cv-request-organization-${lang}`}>{request.organizationLabel}</label>
+        <input id={`cv-request-organization-${lang}`} type="text" autocomplete="organization" required />
+      </div>
+
+      <div class="cv-request-field">
+        <label for={`cv-request-profile-url-${lang}`}>{request.profileUrlLabel}</label>
+        <input id={`cv-request-profile-url-${lang}`} type="url" autocomplete="url" inputmode="url" required />
+      </div>
+
+      <div class="cv-request-field">
+        <label for={`cv-request-type-${lang}`}>{request.cvTypeLabel}</label>
+        <select id={`cv-request-type-${lang}`} required>
+          {cvTypeOptions.map((option) => <option value={option.value}>{option.label}</option>)}
+        </select>
+      </div>
+
+      <div class="cv-request-field">
+        <label for={`cv-request-language-${lang}`}>{request.languageLabel}</label>
+        <select id={`cv-request-language-${lang}`} required>
+          {languageOptions.map((option) => <option value={option.value} selected={option.value === lang}>{option.label}</option>)}
+        </select>
+      </div>
+
+      <div class="cv-request-field cv-request-field--wide">
+        <label for={`cv-request-reason-${lang}`}>{request.reasonLabel}</label>
+        <textarea id={`cv-request-reason-${lang}`} rows="5" placeholder={request.reasonPlaceholder} required></textarea>
+      </div>
+    </div>
+
+    <div class="cv-request-form__actions">
+      <button class="button button--primary" type="button" data-cv-request-submit>{request.submitLabel}</button>
+      <p
+        id={`cv-request-status-${lang}`}
+        class="cv-request-form__status"
+        role="status"
+        aria-live="polite"
+        tabindex="-1"
+        hidden
+        data-cv-request-message
+      >
+        <strong>{request.unavailableTitle}</strong>
+        <span>{request.unavailableMessage}</span>
+      </p>
+    </div>
+  </form>
 </section>
+
+<script>
+  for (const form of document.querySelectorAll('[data-cv-request-form]')) {
+    const submitButton = form.querySelector('[data-cv-request-submit]');
+    const statusMessage = form.querySelector('[data-cv-request-message]');
+
+    const showUnavailableMessage = () => {
+      if (!(form instanceof HTMLFormElement) || !(statusMessage instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!form.reportValidity()) {
+        return;
+      }
+
+      form.reset();
+      statusMessage.hidden = false;
+      statusMessage.focus({ preventScroll: true });
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      showUnavailableMessage();
+    });
+
+    submitButton?.addEventListener('click', showUnavailableMessage);
+  }
+</script>
