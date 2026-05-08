@@ -16,7 +16,7 @@ public sealed class FilePrintJsonArtifactWriter
     };
 
     /// <summary>
-    /// Writes print JSON artifacts to generated/print below the provided output root.
+    /// Writes print JSON artifacts below the provided output root.
     /// </summary>
     /// <param name="outputRoot">The generation output root.</param>
     /// <param name="artifacts">The print JSON artifacts to write.</param>

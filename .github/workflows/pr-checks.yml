@@ -1,0 +1,45 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate public CV portfolio
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run .NET tests
+        run: dotnet test tools/CvGenerator/CvGenerator.sln
+
+      - name: Generate public CV data
+        run: npm run cv:generate
+
+      - name: Build public website
+        run: npm run build
+
+      - name: Run privacy checks
+        run: npm run privacy:check

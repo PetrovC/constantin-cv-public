@@ -11,6 +11,8 @@
     "cv:generate-print": "dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.csproj -- generate-print --input data/cv.yml --private-input data/private/cv.private.yml --output generated",
     "dev": "npm run dev --workspace apps/cv-web",
     "pdf:generate": "node scripts/generate-pdfs.mjs",
+    "privacy:check": "node scripts/check-public-privacy.mjs",
+    "ci:check": "dotnet test tools/CvGenerator/CvGenerator.sln && npm run cv:generate && npm run build && npm run privacy:check",
     "web:build": "npm run build --workspace apps/cv-web"
   },
   "engines": {

@@ -9,17 +9,17 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, '..');
 const printDistDirectory = resolve(repoRoot, 'apps/cv-web/dist-print');
 const privateOverlayPath = resolve(repoRoot, 'data/private/cv.private.yml');
+const frenchPrintRoute = ['fr', 'print'];
+const pdfOutputDirectory = resolve(repoRoot, 'generated', 'pdf', 'fr');
 
 const pdfJobs = [
   {
-    routeName: '/fr/print/one-page/',
-    htmlPath: resolve(printDistDirectory, 'fr/print/one-page/index.html'),
-    outputPath: resolve(repoRoot, 'generated/pdf/fr/CV_Constantin_Petrov_One_Page_FR.pdf')
+    routeParts: [...frenchPrintRoute, 'one-page'],
+    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_One_Page_FR.pdf')
   },
   {
-    routeName: '/fr/print/full-dev/',
-    htmlPath: resolve(printDistDirectory, 'fr/print/full-dev/index.html'),
-    outputPath: resolve(repoRoot, 'generated/pdf/fr/CV_Constantin_Petrov_Full_Dev_FR.pdf')
+    routeParts: [...frenchPrintRoute, 'full-dev'],
+    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_Full_Dev_FR.pdf')
   }
 ];
 
@@ -36,12 +36,13 @@ async function generatePdfs() {
   await runNpmScript('cv:generate-print');
   await runNpmScript('web:build', { CV_WEB_BUILD_MODE: 'print' });
   await ensureBuiltPrintPagesExist();
-  await mkdir(resolve(repoRoot, 'generated/pdf/fr'), { recursive: true });
+  await mkdir(pdfOutputDirectory, { recursive: true });
 
   const browser = await chromium.launch();
 
   try {
     for (const job of pdfJobs) {
+      const htmlPath = getPrintHtmlPath(job.routeParts);
       const page = await browser.newPage({
         viewport: {
           width: 794,
@@ -50,7 +51,7 @@ async function generatePdfs() {
         deviceScaleFactor: 1
       });
 
-      await page.goto(pathToFileURL(job.htmlPath).href, { waitUntil: 'networkidle' });
+      await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'networkidle' });
       await page.emulateMedia({ media: 'print' });
       await page.pdf({
         path: job.outputPath,
@@ -65,7 +66,7 @@ async function generatePdfs() {
       });
       await page.close();
 
-      console.log(`Generated ${job.outputPath} from ${job.routeName}`);
+      console.log(`Generated ${job.outputPath} from ${getPrintRouteName(job.routeParts)}`);
     }
   } finally {
     await browser.close();
@@ -76,8 +77,8 @@ async function ensureBuiltPrintPagesExist() {
   const missingRoutes = [];
 
   for (const job of pdfJobs) {
-    if (!(await exists(job.htmlPath))) {
-      missingRoutes.push(job.routeName);
+    if (!(await exists(getPrintHtmlPath(job.routeParts)))) {
+      missingRoutes.push(getPrintRouteName(job.routeParts));
     }
   }
 
@@ -90,6 +91,14 @@ async function ensureBuiltPrintPagesExist() {
       ].join('\n')
     );
   }
+}
+
+function getPrintHtmlPath(routeParts) {
+  return resolve(printDistDirectory, ...routeParts, 'index.html');
+}
+
+function getPrintRouteName(routeParts) {
+  return `/${routeParts.join('/')}/`;
 }
 
 async function ensurePrivateOverlayExists() {
