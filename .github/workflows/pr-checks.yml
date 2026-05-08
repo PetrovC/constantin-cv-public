@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate public CV portfolio
+    name: "Validate public CV portfolio"
     runs-on: ubuntu-latest
 
     steps:
