@@ -34,6 +34,12 @@ The public website build must use only public web JSON. It must not output priva
 
 Generated PDFs are private artifacts because they may include private contact details. They are reproducible from the public CV source plus the private overlay, so they should not be committed.
 
+## CI Privacy Gate
+
+Public CI runs `npm run privacy:check` after public CV data generation and the Astro build. The check verifies that private generated paths and private reference files are not tracked, then scans tracked source files, public web JSON, and `apps/cv-web/dist` for private contact markers and private print-route output.
+
+The GitHub Pages workflow deploys only `apps/cv-web/dist`. It does not run local PDF generation and it does not upload private generated artifacts.
+
 ## Future CV Request Workflow
 
 A future public workflow can let visitors request a CV instead of downloading private files directly from the public site. That flow should keep private contact data and generated PDFs outside tracked source files and expose only reviewed, intentional artifacts.

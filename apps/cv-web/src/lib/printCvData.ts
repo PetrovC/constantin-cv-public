@@ -111,7 +111,7 @@ const generateCommand =
   'npm run cv:generate-print';
 
 const repoRoot = resolve(process.cwd(), '../..');
-const generatedPrintDirectory = resolve(repoRoot, 'generated/print');
+const generatedPrintDirectory = resolve(repoRoot, 'generated', 'print');
 
 /**
  * Loads the private print CV data generated from the YAML source.
