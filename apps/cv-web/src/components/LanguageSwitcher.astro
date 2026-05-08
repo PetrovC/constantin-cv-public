@@ -1,0 +1,34 @@
+---
+import { supportedLanguages, type SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  currentLang?: SupportedLanguage;
+}
+
+const { currentLang } = Astro.props;
+const labels: Record<SupportedLanguage, string> = {
+  fr: 'FR',
+  en: 'EN',
+  de: 'DE'
+};
+
+const text = currentLang ? uiText[currentLang] : uiText.fr;
+---
+
+<nav class="language-switcher" aria-label={text.languageSelectionLabel}>
+  {
+    supportedLanguages.map((language) => (
+      <a
+        class:list={['language-switcher__link', { 'is-active': language === currentLang }]}
+        href={`/${language}/`}
+        aria-label={`${text.switchLanguageLabel} ${text.languageNames[language]}`}
+        aria-current={language === currentLang ? 'page' : undefined}
+        data-language-option
+        data-language={language}
+      >
+        {labels[language]}
+      </a>
+    ))
+  }
+</nav>

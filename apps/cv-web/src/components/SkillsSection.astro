@@ -1,0 +1,68 @@
+---
+import type { SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface SkillGroupViewModel {
+  name?: string;
+  items?: string[];
+}
+
+interface Props {
+  skills?: SkillGroupViewModel[];
+  softSkills?: SkillGroupViewModel[];
+  lang: SupportedLanguage;
+}
+
+const { skills = [], softSkills = [], lang } = Astro.props as Props;
+const text = uiText[lang];
+---
+
+<section id="skills" class="content-section" aria-labelledby="skills-title">
+  <div class="section-heading">
+    <p class="section-kicker">{text.skillsTitle}</p>
+    <h2 id="skills-title">{text.skillsTitle}</h2>
+  </div>
+
+  <div class="skill-columns">
+    <section class="skill-column" aria-labelledby="technical-skills-title">
+      <h3 id="technical-skills-title">{text.technicalSkillsTitle}</h3>
+      <div class="skill-group-list">
+        {
+          skills.map((group) => (
+            <article class:list={['skill-group', { 'skill-group--dense': (group.items ?? []).length > 12 }]}>
+              <header class="skill-group__header">
+                <h4>{group.name}</h4>
+                <span aria-label={`${(group.items ?? []).length} ${text.skillsTitle}`}>
+                  {(group.items ?? []).length}
+                </span>
+              </header>
+              <ul class="tag-list">
+                {(group.items ?? []).map((item) => (
+                  <li>{item}</li>
+                ))}
+              </ul>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="skill-column" aria-labelledby="soft-skills-title">
+      <h3 id="soft-skills-title">{text.softSkillsTitle}</h3>
+      <div class="skill-group-list">
+        {
+          softSkills.map((group) => (
+            <article class="skill-group skill-group--soft">
+              <h4>{group.name}</h4>
+              <ul class="plain-list">
+                {(group.items ?? []).map((item) => (
+                  <li>{item}</li>
+                ))}
+              </ul>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+  </div>
+</section>

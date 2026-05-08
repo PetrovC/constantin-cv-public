@@ -1,0 +1,59 @@
+---
+import type { GeneratedCvProfile, SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  profile: GeneratedCvProfile;
+  shortSummary: string;
+  lang: SupportedLanguage;
+}
+
+interface ProfileLink {
+  key: string;
+  label: string;
+  href: string;
+}
+
+const { profile, shortSummary, lang } = Astro.props as Props;
+const text = uiText[lang];
+const publicContactHref = profile.links?.linkedin ?? '#contact';
+const profileLinks = [
+  { key: 'linkedin', label: text.profileLinks.linkedin, href: profile.links?.linkedin },
+  { key: 'github', label: text.profileLinks.github, href: profile.links?.github },
+  { key: 'website', label: text.profileLinks.website, href: profile.links?.website }
+].filter((link): link is ProfileLink => Boolean(link.href));
+---
+
+<section class="hero-section" aria-labelledby="hero-title">
+  <div class="hero-section__content">
+    <p class="eyebrow">{text.portfolioLabel}</p>
+    <h1 id="hero-title">{profile.fullName}</h1>
+    <p class="hero-section__title">{profile.title}</p>
+    <p class="hero-section__subtitle">{profile.subtitle}</p>
+    <p class="hero-section__value">{shortSummary}</p>
+    <div class="hero-actions">
+      <a class="button button--primary" href="#profile">{text.heroAction}</a>
+      <a class="button button--secondary" href={publicContactHref}>{text.contactAction}</a>
+      <a class="button button--ghost" href="#download">{text.heroDownloadAction}</a>
+    </div>
+  </div>
+
+  <aside class="hero-panel" aria-labelledby="hero-panel-title">
+    <div class="hero-panel__header">
+      <span>{text.locationLabel}</span>
+      <p id="hero-panel-title" class="hero-panel__title">{profile.location}</p>
+    </div>
+
+    {
+      profileLinks.length > 0 && (
+        <div class="profile-link-list" aria-label={text.linksTitle}>
+          {profileLinks.map((link) => (
+            <a href={link.href} rel="noreferrer" target="_blank">
+              {link.label}
+            </a>
+          ))}
+        </div>
+      )
+    }
+  </aside>
+</section>

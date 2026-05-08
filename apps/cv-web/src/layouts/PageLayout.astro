@@ -1,0 +1,116 @@
+---
+import LanguageSwitcher from '../components/LanguageSwitcher.astro';
+import type { SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  lang?: SupportedLanguage;
+}
+
+const { title, description, lang = 'fr' } = Astro.props;
+const text = uiText[lang];
+---
+
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href={`/${lang}/`} aria-label="Constantin Petrov">
+          <span class="brand__mark">CP</span>
+          <span>
+            <strong>Constantin Petrov</strong>
+            <small>{text.brandRole}</small>
+          </span>
+        </a>
+        <nav class="site-nav" aria-label={text.navLabel} data-site-nav>
+          <a href="#profile" data-section-link="profile">{text.navProfile}</a>
+          <a href="#skills" data-section-link="skills">{text.navSkills}</a>
+          <a href="#experience" data-section-link="experience">{text.navExperience}</a>
+          <a href="#contact" data-section-link="contact">{text.navContact}</a>
+        </nav>
+        <LanguageSwitcher currentLang={lang} />
+      </header>
+      <slot />
+    </div>
+    <script is:inline>
+      (() => {
+        const storageKey = 'constantinPreferredLanguage';
+        const languageLinks = document.querySelectorAll('[data-language-option]');
+
+        for (const link of languageLinks) {
+          link.addEventListener('click', () => {
+            try {
+              window.localStorage.setItem(storageKey, link.getAttribute('data-language'));
+            } catch {
+              // Language links keep working when storage is unavailable.
+            }
+          });
+        }
+
+        const nav = document.querySelector('[data-site-nav]');
+
+        if (!nav) {
+          return;
+        }
+
+        const links = Array.from(nav.querySelectorAll('[data-section-link]'));
+        const sections = links
+          .map((link) => document.getElementById(link.getAttribute('data-section-link')))
+          .filter(Boolean);
+
+        const setActiveSection = (sectionId) => {
+          for (const link of links) {
+            const isActive = link.getAttribute('data-section-link') === sectionId;
+            link.classList.toggle('is-active', isActive);
+
+            if (isActive) {
+              link.setAttribute('aria-current', 'location');
+            } else {
+              link.removeAttribute('aria-current');
+            }
+          }
+        };
+
+        for (const link of links) {
+          link.addEventListener('click', () => {
+            setActiveSection(link.getAttribute('data-section-link'));
+          });
+        }
+
+        if (!('IntersectionObserver' in window)) {
+          return;
+        }
+
+        const observer = new IntersectionObserver(
+          (entries) => {
+            const visibleEntry = entries
+              .filter((entry) => entry.isIntersecting)
+              .sort((first, second) => second.intersectionRatio - first.intersectionRatio)[0];
+
+            if (visibleEntry) {
+              setActiveSection(visibleEntry.target.id);
+            }
+          },
+          {
+            rootMargin: '-28% 0px -58% 0px',
+            threshold: [0.12, 0.28, 0.42]
+          }
+        );
+
+        for (const section of sections) {
+          observer.observe(section);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+# Generated artifacts
+generated/
+apps/cv-web/dist/
+apps/cv-web/dist-print/
+
+# Private CV data and source references
+data/private/cv.private.yml
+references/
+references/private/
+references/**/*.pdf
+references/**/*.docx
+
+# .NET
+bin/
+obj/
+.dotnet/
+.dotnet-home/
+.nuget-packages/
+TestResults/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Astro
+.astro/
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Default ignored files
+/shelf/
+/workspace.xml
+# Rider ignored files
+/.idea.constantin-cv.iml
+/modules.xml
+/projectSettingsUpdater.xml
+/contentModel.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Ignored default folder with query files
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml

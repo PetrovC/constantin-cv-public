@@ -1,0 +1,45 @@
+---
+import type { GeneratedCvProfile, SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  profile: GeneratedCvProfile;
+  lang: SupportedLanguage;
+}
+
+interface ProfileLink {
+  key: string;
+  label: string;
+  href: string;
+}
+
+const { profile, lang } = Astro.props as Props;
+const text = uiText[lang];
+const publicContactHref = profile.links?.linkedin ?? '#';
+const profileLinks = [
+  { key: 'linkedin', label: text.profileLinks.linkedin, href: profile.links?.linkedin },
+  { key: 'github', label: text.profileLinks.github, href: profile.links?.github },
+  { key: 'website', label: text.profileLinks.website, href: profile.links?.website }
+].filter((link): link is ProfileLink => Boolean(link.href));
+---
+
+<section id="contact" class="content-section contact-section" aria-labelledby="contact-title">
+  <div>
+    <p class="section-kicker">{text.contactTitle}</p>
+    <h2 id="contact-title">{profile.fullName}</h2>
+  </div>
+  <div class="contact-links">
+    <a class="contact-link contact-link--primary" href={publicContactHref}>
+      <span>{text.profileLinks.linkedin}</span>
+      <strong>{text.contactAction}</strong>
+    </a>
+    {
+      profileLinks.map((link) => (
+        <a class="contact-link" href={link.href} rel="noreferrer" target="_blank">
+          <span>{link.label}</span>
+          <strong>{link.label}</strong>
+        </a>
+      ))
+    }
+  </div>
+</section>

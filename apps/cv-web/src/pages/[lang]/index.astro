@@ -1,0 +1,49 @@
+---
+import ContactSection from '../../components/ContactSection.astro';
+import DownloadSection from '../../components/DownloadSection.astro';
+import EducationSection from '../../components/EducationSection.astro';
+import ExperienceSection from '../../components/ExperienceSection.astro';
+import HeroSection from '../../components/HeroSection.astro';
+import LanguagesSection from '../../components/LanguagesSection.astro';
+import SkillsSection from '../../components/SkillsSection.astro';
+import SummarySection from '../../components/SummarySection.astro';
+import PageLayout from '../../layouts/PageLayout.astro';
+import {
+  getWebsiteVisibleExperiences,
+  loadAllGeneratedCvDocuments,
+  type GeneratedCvDocument,
+  type SupportedLanguage
+} from '../../lib/cvData';
+
+interface Props {
+  cv: GeneratedCvDocument;
+  lang: SupportedLanguage;
+}
+
+export async function getStaticPaths() {
+  const documents = await loadAllGeneratedCvDocuments();
+
+  return (Object.entries(documents) as [SupportedLanguage, GeneratedCvDocument][]).map(
+    ([lang, cv]) => ({
+      params: { lang },
+      props: { lang, cv }
+    })
+  );
+}
+
+const { cv, lang } = Astro.props as Props;
+const websiteExperiences = getWebsiteVisibleExperiences(cv.experiences);
+---
+
+<PageLayout title={`${cv.profile.fullName} | ${cv.profile.title}`} description={cv.summary.short} lang={lang}>
+  <main>
+    <HeroSection profile={cv.profile} shortSummary={cv.summary.short} lang={lang} />
+    <SummarySection summary={cv.summary} lang={lang} />
+    <SkillsSection skills={cv.skills} softSkills={cv.softSkills} lang={lang} />
+    <LanguagesSection languages={cv.spokenLanguages} lang={lang} />
+    <EducationSection education={cv.education} continuousLearning={cv.continuousLearning} lang={lang} />
+    <ExperienceSection experiences={websiteExperiences} lang={lang} />
+    <DownloadSection lang={lang} />
+    <ContactSection profile={cv.profile} lang={lang} />
+  </main>
+</PageLayout>

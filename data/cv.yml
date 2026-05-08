@@ -1,0 +1,552 @@
+schemaVersion: 1
+
+languages:
+  primary: fr
+  supported:
+    - fr
+    - en
+    - de
+
+profile:
+  firstName: Constantin
+  lastName: Petrov
+  title:
+    fr: Développeur Fullstack .NET / Angular / Vue.js
+    en: Fullstack .NET / Angular / Vue.js Developer
+    de: Fullstack-Entwickler .NET / Angular / Vue.js
+  subtitle:
+    fr: Applications métier, modernisation applicative et qualité logicielle
+    en: Business applications, application modernization and software quality
+    de: Geschäftsanwendungen, Anwendungsmodernisierung und Softwarequalität
+  location: Belgique / Luxembourg
+  links:
+    linkedin: https://www.linkedin.com/in/c-petrov
+
+summary:
+  short:
+    fr: Développeur Fullstack avec environ 5 ans d'expérience sur des applications métier au Luxembourg, principalement en contexte banque, CRM, paie et solutions internes.
+    en: Fullstack developer with about 5 years of experience on business applications in Luxembourg, mainly in banking, CRM, payroll and internal solutions.
+    de: Fullstack-Entwickler mit rund 5 Jahren Erfahrung in Geschäftsanwendungen in Luxemburg, vor allem in den Bereichen Banking, CRM, Lohnabrechnung und interne Lösungen.
+  long:
+    fr: Constantin intervient sur des environnements .NET modernes et legacy, du back-end C# aux interfaces Angular et Vue.js. Son approche privilégie la compréhension métier, la maintenabilité, les tests, le refactoring prudent et la modernisation progressive des systèmes existants.
+    en: Constantin works across modern and legacy .NET environments, from C# back-end services to Angular and Vue.js interfaces. His approach focuses on business understanding, maintainability, testing, careful refactoring and progressive modernization of existing systems.
+    de: Constantin arbeitet in modernen und bestehenden .NET-Umgebungen, von C#-Backend-Diensten bis zu Oberflächen mit Angular und Vue.js. Sein Ansatz legt Wert auf fachliches Verständnis, Wartbarkeit, Tests, vorsichtiges Refactoring und schrittweise Modernisierung bestehender Systeme.
+
+skills:
+  - name:
+      fr: Back-end .NET
+      en: .NET back-end
+      de: .NET-Backend
+    items:
+      - C#
+      - .NET
+      - .NET Core
+      - .NET Framework
+      - ASP.NET Core Web API
+      - ASP.NET MVC
+      - Entity Framework
+      - EF Core
+      - ADO.NET
+      - LINQ
+      - REST
+      - SOAP
+      - SignalR
+      - Quartz.NET
+      - JWT
+      - Auth0
+  - name:
+      fr: Front-end
+      en: Front-end
+      de: Frontend
+    items:
+      - Angular
+      - Vue.js 3
+      - Quasar
+      - TypeScript
+      - JavaScript
+      - HTML5
+      - CSS3
+      - SCSS
+      - Sass
+      - PrimeNG
+      - Ionic
+      - Cordova
+      - PWA
+  - name:
+      fr: Données
+      en: Data
+      de: Daten
+    items:
+      - SQL Server
+      - PostgreSQL
+      - T-SQL
+      - Requêtes SQL complexes
+      - Procédures stockées
+      - Triggers
+      - Optimisation SQL
+      - SSMS
+      - SSIS
+  - name:
+      fr: Qualité, architecture et méthodes
+      en: Quality, architecture and methods
+      de: Qualität, Architektur und Methoden
+    items:
+      - Clean Code
+      - SOLID
+      - Refactoring
+      - Tests unitaires
+      - Tests d'intégration
+      - xUnit
+      - SpecFlow
+      - TDD
+      - Code review
+      - DDD
+      - CQRS
+      - Repository Pattern
+      - Event-driven design
+      - Architecture 3 tiers
+      - UML
+      - BPMN
+      - Agile
+      - Scrum
+  - name:
+      fr: DevOps et outils
+      en: DevOps and tools
+      de: DevOps und Werkzeuge
+    items:
+      - Azure DevOps
+      - Git
+      - CI/CD
+      - Docker
+      - SonarQube
+      - Jira
+      - Visual Studio
+      - Visual Studio Code
+      - JetBrains Rider
+      - WebStorm
+      - IIS
+      - Microsoft Dynamics 365 Business Central
+      - AL
+      - XLIFF
+
+softSkills:
+  - name:
+      fr: Collaboration
+      en: Collaboration
+      de: Zusammenarbeit
+    items:
+      - fr: Communication claire avec les équipes produit, métier et techniques.
+        en: Clear communication with product, business and technical teams.
+        de: Klare Kommunikation mit Produkt-, Fach- und Technikteams.
+      - fr: Esprit d'équipe, partage de connaissances et participation active aux revues de code.
+        en: Team mindset, knowledge sharing and active participation in code reviews.
+        de: Teamorientierung, Wissensaustausch und aktive Teilnahme an Code Reviews.
+  - name:
+      fr: Approche métier
+      en: Business approach
+      de: Fachlicher Ansatz
+    items:
+      - fr: Capacité à comprendre le besoin fonctionnel et à le traduire en solution technique maintenable.
+        en: Ability to understand functional needs and translate them into maintainable technical solutions.
+        de: Fähigkeit, fachliche Anforderungen zu verstehen und in wartbare technische Lösungen zu übersetzen.
+      - fr: Orientation solution dans des environnements exigeants, notamment banque, paie et applications internes.
+        en: Solution-oriented mindset in demanding environments, especially banking, payroll and internal applications.
+        de: Lösungsorientierte Arbeitsweise in anspruchsvollen Umgebungen, insbesondere Banking, Lohnabrechnung und interne Anwendungen.
+  - name:
+      fr: Qualité et amélioration continue
+      en: Quality and continuous improvement
+      de: Qualität und kontinuierliche Verbesserung
+    items:
+      - fr: Rigueur, autonomie et adaptation dans la modernisation progressive d'applications existantes.
+        en: Rigor, autonomy and adaptability when progressively modernizing existing applications.
+        de: Sorgfalt, Eigenständigkeit und Anpassungsfähigkeit bei der schrittweisen Modernisierung bestehender Anwendungen.
+      - fr: Curiosité technique et attention constante à la maintenabilité, aux tests et à la limitation des régressions.
+        en: Technical curiosity and constant attention to maintainability, testing and regression control.
+        de: Technische Neugier und stetige Aufmerksamkeit für Wartbarkeit, Tests und Regressionskontrolle.
+
+spokenLanguages:
+  - name:
+      fr: Français
+      en: French
+      de: Französisch
+    level:
+      fr: Langue maternelle
+      en: Native
+      de: Muttersprache
+    order: 1
+  - name:
+      fr: Russe
+      en: Russian
+      de: Russisch
+    level:
+      fr: Langue maternelle
+      en: Native
+      de: Muttersprache
+    order: 2
+  - name:
+      fr: Anglais
+      en: English
+      de: Englisch
+    level:
+      fr: Professionnel technique / intermédiaire
+      en: Technical professional / intermediate
+      de: Technisches Berufsenglisch / Mittelstufe
+    order: 3
+
+education:
+  - institution: Technobel
+    degree:
+      fr: Développeur informatique / programmation .NET et Angular
+      en: Software developer / .NET and Angular programming
+      de: Softwareentwickler / .NET- und Angular-Programmierung
+    period:
+      from: "2021-03"
+      to: "2022-01"
+    description:
+      fr: Formation intensive fullstack couvrant C#, ASP.NET Core, Angular, TypeScript, SQL Server, Web API, Entity Framework, Agile/Scrum, tests, analyse et gestion de projet.
+      en: Intensive fullstack training covering C#, ASP.NET Core, Angular, TypeScript, SQL Server, Web API, Entity Framework, Agile/Scrum, testing, analysis and project management.
+      de: Intensive Fullstack-Ausbildung mit C#, ASP.NET Core, Angular, TypeScript, SQL Server, Web API, Entity Framework, Agile/Scrum, Tests, Analyse und Projektmanagement.
+  - institution: Technifutur
+    degree:
+      fr: Mécanicien avion PART 66-A
+      en: Aircraft mechanic PART 66-A
+      de: Fluggerätmechaniker PART 66-A
+    period:
+      from: "2016"
+      to: "2017"
+    description:
+      fr: Formation technique en mécanique et maintenance d'appareils aériens.
+      en: Technical training in aircraft mechanics and maintenance.
+      de: Technische Ausbildung in Flugzeugmechanik und Wartung.
+  - institution: HEPL
+    degree:
+      fr: 1er BAC en informatique et systèmes
+      en: First-year bachelor's program in computing and systems
+      de: Erstes Bachelorjahr in Informatik und Systemen
+    period:
+      from: "2013"
+      to: "2014"
+    description:
+      fr: Parcours d'initiation en informatique et systèmes.
+      en: Introductory program in computing and systems.
+      de: Einführender Studiengang in Informatik und Systemen.
+  - institution: HEC Liège
+    degree:
+      fr: 1er BAC en sciences économiques et de gestion
+      en: First-year bachelor's program in economics and management
+      de: Erstes Bachelorjahr in Wirtschafts- und Managementwissenschaften
+    period:
+      from: "2011"
+      to: "2013"
+    description:
+      fr: Formation initiale en économie, gestion et analyse d'entreprise.
+      en: Initial training in economics, management and business analysis.
+      de: Grundausbildung in Wirtschaft, Management und Unternehmensanalyse.
+  - institution: Institut Sainte-Marie Providence
+    degree:
+      fr: CESS en économie de gestion
+      en: Upper secondary diploma in management economics
+      de: Sekundarschulabschluss in Managementökonomie
+    period:
+      from: "2006"
+      to: "2011"
+    description:
+      fr: Formation secondaire orientée économie et gestion.
+      en: Secondary education focused on economics and management.
+      de: Sekundarschulbildung mit Schwerpunkt Wirtschaft und Management.
+
+continuousLearning:
+  title:
+    fr: Formation continue et axes de progression
+    en: Continuous learning and development focus
+    de: Weiterbildung und Entwicklungsschwerpunkte
+  items:
+    - fr: Objectifs de certification Microsoft Azure Developer Associate AZ-204 et Azure Solutions Architect Expert AZ-305.
+      en: Certification goals for Microsoft Azure Developer Associate AZ-204 and Azure Solutions Architect Expert AZ-305.
+      de: Zertifizierungsziele für Microsoft Azure Developer Associate AZ-204 und Azure Solutions Architect Expert AZ-305.
+    - fr: Approfondissement de Docker, Kubernetes, CKAD, CKA et des pratiques cloud, avec AWS Certified Solutions Architect Associate comme objectif possible.
+      en: Further development in Docker, Kubernetes, CKAD, CKA and cloud practices, with AWS Certified Solutions Architect Associate as a possible goal.
+      de: Vertiefung in Docker, Kubernetes, CKAD, CKA und Cloud-Praktiken, mit AWS Certified Solutions Architect Associate als möglichem Ziel.
+    - fr: Veille active sur l'architecture logicielle .NET, Clean Architecture, DDD, CQRS, qualité logicielle et modernisation d'applications legacy.
+      en: Active learning on .NET software architecture, Clean Architecture, DDD, CQRS, software quality and legacy application modernization.
+      de: Aktive Weiterbildung zu .NET-Softwarearchitektur, Clean Architecture, DDD, CQRS, Softwarequalität und Modernisierung bestehender Anwendungen.
+
+experiences:
+  - id: elliott-group
+    company: Elliott Group
+    role:
+      fr: Consultant Fullstack .NET / Angular / Vue.js
+      en: Fullstack .NET / Angular / Vue.js Consultant
+      de: Fullstack-Berater .NET / Angular / Vue.js
+    period:
+      from: "2022-08"
+      to: present
+    visibility:
+      website: true
+      shortCv: true
+      fullDevCv: true
+      fullCompleteCv: true
+      linkedin: true
+    missions:
+      - id: proximus-nxt
+        name: Proximus NXT
+        title:
+          fr: Applications internes, solutions métier et Apsal
+          en: Internal applications, business solutions and Apsal
+          de: Interne Anwendungen, Geschäftslösungen und Apsal
+        tags:
+          - C#
+          - .NET Framework 4.8
+          - .NET 9 Web API
+          - EF Core
+          - SQL Server
+          - SOAP
+          - xUnit
+          - SpecFlow
+          - Azure DevOps
+          - Docker
+        bullets:
+          - fr: Maintien et évolution de solutions internes, dont une application historique en .NET Framework, avec migration 4.7.x vers 4.8.x, mise à jour NuGet, refactoring et corrections ciblées.
+            en: Maintained and evolved internal solutions, including a legacy .NET Framework application, with migration from 4.7.x to 4.8.x, NuGet updates, refactoring and targeted fixes.
+            de: Wartung und Weiterentwicklung interner Lösungen, darunter eine bestehende .NET-Framework-Anwendung, mit Migration von 4.7.x auf 4.8.x, NuGet-Aktualisierungen, Refactoring und gezielten Korrekturen.
+          - fr: Contribution à Apsal, solution de gestion de la paie luxembourgeoise, via le développement de fonctionnalités .NET Web API / EF Core, tests unitaires et tests d'intégration.
+            en: Contributed to Apsal, a Luxembourg payroll management solution, through .NET Web API / EF Core feature development, unit tests and integration tests.
+            de: Mitarbeit an Apsal, einer luxemburgischen Lösung für Lohnabrechnung, durch Entwicklung von .NET Web API / EF Core-Funktionen, Unit-Tests und Integrationstests.
+          - fr: Collaboration avec les équipes produit et métier pour traduire les besoins fonctionnels, documenter les changements, participer aux revues de code et limiter les régressions.
+            en: Worked with product and business teams to translate functional needs, document changes, take part in code reviews and reduce regressions.
+            de: Zusammenarbeit mit Produkt- und Fachteams, um fachliche Anforderungen zu übersetzen, Änderungen zu dokumentieren, an Code Reviews teilzunehmen und Regressionen zu begrenzen.
+      - id: carbon-suite
+        name: Carbon Suite
+        title:
+          fr: CRM interne pour gestion du personnel, contrats et habilitations
+          en: Internal CRM for personnel, contract and permission management
+          de: Internes CRM für Personal-, Vertrags- und Berechtigungsverwaltung
+        tags:
+          - Vue.js 3
+          - Quasar
+          - .NET Core
+          - C#
+          - Entity Framework
+          - Azure DevOps
+          - JetBrains Rider
+          - WebStorm
+        bullets:
+          - fr: Maintenance évolutive de Carbon Suite, CRM interne orienté gestion du personnel, contrats et structures organisationnelles.
+            en: Evolved and maintained Carbon Suite, an internal CRM focused on personnel, contracts and organizational structures.
+            de: Weiterentwicklung und Wartung von Carbon Suite, einem internen CRM für Personal, Verträge und Organisationsstrukturen.
+          - fr: Développement de composants Vue.js 3 / Quasar, correction d'anomalies et amélioration de l'expérience utilisateur.
+            en: Built Vue.js 3 / Quasar components, fixed defects and improved the user experience.
+            de: Entwicklung von Vue.js 3 / Quasar-Komponenten, Fehlerbehebung und Verbesserung der Nutzererfahrung.
+          - fr: Contribution aux modules de gestion des contrats, rôles, permissions et structures organisationnelles en lien avec les processus métier.
+            en: Contributed to contract, role, permission and organizational structure modules aligned with business processes.
+            de: Mitarbeit an Modulen für Verträge, Rollen, Berechtigungen und Organisationsstrukturen in Abstimmung mit Geschäftsprozessen.
+      - id: intesa-sanpaolo-servitia
+        name: Intesa Sanpaolo Servitia
+        title:
+          fr: Applications bancaires, workflows et gestion documentaire
+          en: Banking applications, workflows and document management
+          de: Bankanwendungen, Workflows und Dokumentenmanagement
+        tags:
+          - C#
+          - .NET 6
+          - .NET 7
+          - .NET 8
+          - ASP.NET
+          - Web API
+          - Entity Framework
+          - Vue.js
+          - SQL Server
+          - SignalR
+          - Quartz.NET
+          - Azure DevOps
+        bullets:
+          - fr: Développement from scratch et évolution d'applications bancaires pour workflows, gestion documentaire, monitoring, validations et droits d'accès.
+            en: Built from scratch and evolved banking applications for workflows, document management, monitoring, validations and access rights.
+            de: Neuentwicklung und Weiterentwicklung von Bankanwendungen für Workflows, Dokumentenmanagement, Monitoring, Validierungen und Zugriffsrechte.
+          - fr: Participation aux migrations .NET 6 vers .NET 7 puis .NET 8, avec transition progressive d'une architecture Microsoft Orleans vers Web API.
+            en: Took part in migrations from .NET 6 to .NET 7 and then .NET 8, with a progressive transition from Microsoft Orleans to Web API.
+            de: Mitarbeit an Migrationen von .NET 6 auf .NET 7 und danach .NET 8, mit schrittweisem Übergang von Microsoft Orleans zu Web API.
+          - fr: Mise en place de notifications SignalR, traitements planifiés Quartz.NET, audits, rappels documentaires et suivi de validité.
+            en: Implemented SignalR notifications, Quartz.NET scheduled processing, audits, document reminders and validity tracking.
+            de: Umsetzung von SignalR-Benachrichtigungen, geplanten Quartz.NET-Verarbeitungen, Audits, Dokumentenerinnerungen und Gültigkeitsverfolgung.
+          - fr: Optimisation SQL et maintenance de requêtes complexes, procédures stockées et triggers dans un environnement bancaire exigeant.
+            en: Optimized SQL and maintained complex queries, stored procedures and triggers in a demanding banking environment.
+            de: SQL-Optimierung sowie Wartung komplexer Abfragen, Stored Procedures und Trigger in einem anspruchsvollen Bankenumfeld.
+  - id: digital-vision
+    company: Digital Vision
+    role:
+      fr: Développeur Microsoft Dynamics 365 Business Central
+      en: Microsoft Dynamics 365 Business Central developer
+      de: Microsoft Dynamics 365 Business Central-Entwickler
+    period:
+      from: "2022-05"
+      to: "2022-08"
+    visibility:
+      website: true
+      shortCv: true
+      fullDevCv: true
+      fullCompleteCv: true
+      linkedin: true
+    missions:
+      - id: business-central-extensions
+        name: Microsoft Dynamics 365 Business Central
+        title:
+          fr: Extensions Microsoft Dynamics 365 Business Central
+          en: Microsoft Dynamics 365 Business Central extensions
+          de: Microsoft Dynamics 365 Business Central-Erweiterungen
+        tags:
+          - AL
+          - XLIFF
+          - Microsoft Dynamics 365 Business Central
+          - Visual Studio Code
+          - Azure DevOps
+          - Git
+          - Jira
+        bullets:
+          - fr: Développement et déploiement d'extensions AL pour Microsoft Dynamics 365 Business Central.
+            en: Developed and deployed AL extensions for Microsoft Dynamics 365 Business Central.
+            de: Entwicklung und Bereitstellung von AL-Erweiterungen für Microsoft Dynamics 365 Business Central.
+          - fr: Adaptation de workflows métier, maintenance, débogage, documentation technique et gestion des traductions XLIFF.
+            en: Adapted business workflows and handled maintenance, debugging, technical documentation and XLIFF translation management.
+            de: Anpassung fachlicher Workflows sowie Wartung, Debugging, technische Dokumentation und Verwaltung von XLIFF-Übersetzungen.
+          - fr: Suivi des tâches et du versioning avec Azure DevOps, Git et Jira dans un environnement agile.
+            en: Tracked tasks and versioning with Azure DevOps, Git and Jira in an agile environment.
+            de: Aufgabenverfolgung und Versionierung mit Azure DevOps, Git und Jira in einem agilen Umfeld.
+  - id: plant-c-technobel
+    company: Plant C / Technobel
+    role:
+      fr: Développeur back-end
+      en: Back-end developer
+      de: Backend-Entwickler
+    period:
+      from: "2021-11"
+      to: "2022-01"
+    visibility:
+      website: false
+      shortCv: false
+      fullDevCv: true
+      fullCompleteCv: true
+      linkedin: false
+    missions:
+      - id: playzone
+        name: PlayZone
+        title:
+          fr: Solution web pour la gestion de projets durables
+          en: Web solution for sustainable project management
+          de: Weblösung für nachhaltiges Projektmanagement
+        tags:
+          - C#
+          - .NET Core
+          - ASP.NET Core Web API
+          - ADO.NET
+          - LINQ
+          - PostgreSQL
+          - REST
+          - JWT
+          - Auth0
+          - Git
+        bullets:
+          - fr: Analyse des besoins client et conception d'une solution back-end adaptée à l'amélioration de la gestion de projets durables.
+            en: Analyzed client needs and designed a back-end solution to improve sustainable project management.
+            de: Analyse der Kundenanforderungen und Entwurf einer Backend-Lösung zur Verbesserung nachhaltiger Projektverwaltung.
+          - fr: Développement d'API REST en C# / .NET Core avec architecture 3 tiers, ADO.NET, LINQ, PostgreSQL et authentification JWT / Auth0.
+            en: Developed REST APIs in C# / .NET Core with a three-tier architecture, ADO.NET, LINQ, PostgreSQL and JWT / Auth0 authentication.
+            de: Entwicklung von REST APIs in C# / .NET Core mit Drei-Schichten-Architektur, ADO.NET, LINQ, PostgreSQL und JWT / Auth0-Authentifizierung.
+          - fr: Participation à la présentation du projet et à l'intégration des retours d'amélioration.
+            en: Took part in project presentation and the integration of improvement feedback.
+            de: Mitarbeit an der Projektpräsentation und Integration von Verbesserungsvorschlägen.
+  - id: citizens-of-wallonia
+    company: Hackathon Citizens of Wallonia
+    role:
+      fr: Développeur front-end
+      en: Front-end developer
+      de: Frontend-Entwickler
+    period:
+      from: "2020-10"
+      to: "2020-10"
+    visibility:
+      website: false
+      shortCv: false
+      fullDevCv: true
+      fullCompleteCv: true
+      linkedin: false
+    missions:
+      - id: mons-interactive-map
+        name: Carte interactive de Mons
+        title:
+          fr: Prototype front-end pour points d'intérêt
+          en: Front-end prototype for points of interest
+          de: Frontend-Prototyp für Sehenswürdigkeiten
+        tags:
+          - Ionic
+          - Angular
+          - Cordova
+          - json-server
+        bullets:
+          - fr: Création d'une interface Angular / Ionic / Cordova pour promouvoir les points d'intérêt de la ville de Mons.
+            en: Created an Angular / Ionic / Cordova interface to promote points of interest in the city of Mons.
+            de: Erstellung einer Angular / Ionic / Cordova-Oberfläche zur Präsentation von Sehenswürdigkeiten der Stadt Mons.
+          - fr: Collaboration en équipe sous contrainte de temps et livraison d'un prototype fonctionnel présenté en fin de hackathon.
+            en: Collaborated under time pressure and delivered a functional prototype presented at the end of the hackathon.
+            de: Zusammenarbeit unter Zeitdruck und Lieferung eines funktionsfähigen Prototyps, der am Ende des Hackathons vorgestellt wurde.
+  - id: wilbow
+    company: Wilbow SA
+    role:
+      fr: Installateur fibre optique
+      en: Fiber optic installer
+      de: Glasfaserinstallateur
+    period:
+      from: "2020"
+      to: "2020"
+    visibility:
+      website: false
+      shortCv: false
+      fullDevCv: false
+      fullCompleteCv: true
+      linkedin: false
+    missions:
+      - id: fiber-installation
+        name: Installation fibre optique
+        title:
+          fr: Génie civil et installation intérieure
+          en: Civil works and indoor installation
+          de: Tiefbau und Inneninstallation
+        tags:
+          - Fibre optique
+          - Génie civil
+        bullets:
+          - fr: Travaux de génie civil, soufflage, jointage de fibre optique et installation intérieure.
+            en: Performed civil works, fiber blowing, splicing and indoor installation.
+            de: Durchführung von Tiefbauarbeiten, Einblasen, Spleißen von Glasfasern und Inneninstallation.
+  - id: safran-aero-boosters
+    company: Safran Aero Boosters
+    role:
+      fr: Ouvrier polyvalent
+      en: Versatile production worker
+      de: Vielseitiger Produktionsmitarbeiter
+    period:
+      from: "2017"
+      to: "2019"
+    visibility:
+      website: false
+      shortCv: false
+      fullDevCv: false
+      fullCompleteCv: true
+      linkedin: false
+    missions:
+      - id: industrial-production
+        name: Production industrielle
+        title:
+          fr: Montage, contrôle et support production
+          en: Assembly, inspection and production support
+          de: Montage, Kontrolle und Produktionsunterstützung
+        tags:
+          - Qualité
+          - Production
+        bullets:
+          - fr: Montage, contrôle, essais, magasinage et retouches dans un environnement industriel exigeant.
+            en: Handled assembly, inspection, testing, warehousing and rework in a demanding industrial environment.
+            de: Montage, Kontrolle, Tests, Lagerarbeiten und Nacharbeiten in einem anspruchsvollen industriellen Umfeld.
+          - fr: Application rigoureuse des procédures qualité et collaboration avec les équipes production et qualité.
+            en: Applied quality procedures rigorously and collaborated with production and quality teams.
+            de: Sorgfältige Anwendung von Qualitätsverfahren und Zusammenarbeit mit Produktions- und Qualitätsteams.

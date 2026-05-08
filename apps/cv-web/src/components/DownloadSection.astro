@@ -1,0 +1,23 @@
+---
+import type { SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  lang: SupportedLanguage;
+}
+
+const { lang } = Astro.props as Props;
+const text = uiText[lang];
+---
+
+<section id="download" class="content-section two-column-section" aria-labelledby="download-title">
+  <div>
+    <p class="section-kicker">{text.downloadTitle}</p>
+    <h2 id="download-title">{text.downloadTitle}</h2>
+  </div>
+  <div class="download-placeholder">
+    <span class="download-placeholder__badge">{text.downloadPlaceholder}</span>
+    <p>{text.downloadText}</p>
+    <span class="button button--secondary" aria-disabled="true">{text.downloadTitle}</span>
+  </div>
+</section>

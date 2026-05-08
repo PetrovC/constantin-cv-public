@@ -1,0 +1,33 @@
+---
+import type { GeneratedCvSummary, SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  summary: GeneratedCvSummary;
+  lang: SupportedLanguage;
+}
+
+const { summary, lang } = Astro.props as Props;
+const text = uiText[lang];
+---
+
+<section id="profile" class="content-section summary-grid" aria-labelledby="summary-title">
+  <div>
+    <p class="section-kicker">{text.summaryTitle}</p>
+    <h2 id="summary-title">{summary.short}</h2>
+  </div>
+  <div class="summary-body">
+    <p>{summary.long}</p>
+    <div class="value-card-list" aria-label={text.summaryTitle}>
+      {
+        text.valueCards.map((card) => (
+          <article class="value-card">
+            <span aria-hidden="true"></span>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>

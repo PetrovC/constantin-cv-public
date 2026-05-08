@@ -1,0 +1,97 @@
+---
+import '../styles/global.css';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="description"
+      content="Multilingual CV and portfolio for Constantin Petrov."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Constantin Petrov | CV & Portfolio</title>
+    <script is:inline>
+      (() => {
+        const supportedLanguages = ['fr', 'en', 'de'];
+        const storageKey = 'constantinPreferredLanguage';
+        const fallbackLanguage = 'en';
+
+        const getStoredLanguage = () => {
+          try {
+            const language = window.localStorage.getItem(storageKey);
+            return supportedLanguages.includes(language) ? language : undefined;
+          } catch {
+            return undefined;
+          }
+        };
+
+        const getBrowserLanguage = () => {
+          const browserLanguages =
+            Array.isArray(window.navigator.languages) && window.navigator.languages.length > 0
+              ? window.navigator.languages
+              : [window.navigator.language];
+
+          for (const language of browserLanguages) {
+            const normalizedLanguage = String(language).toLowerCase().split('-')[0];
+
+            if (supportedLanguages.includes(normalizedLanguage)) {
+              return normalizedLanguage;
+            }
+          }
+
+          return fallbackLanguage;
+        };
+
+        const language = getStoredLanguage() ?? getBrowserLanguage();
+        window.location.replace(`/${language}/`);
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="root-page">
+      <section class="root-choice" aria-labelledby="language-title">
+        <p class="eyebrow">Constantin Petrov</p>
+        <h1 id="language-title">Choose a language</h1>
+        <p>
+          The portfolio should open automatically in your preferred language.
+          You can also choose a static localized page.
+        </p>
+        <noscript>
+          <p>JavaScript is disabled, so automatic language detection is unavailable.</p>
+        </noscript>
+        <div class="language-choice-list" aria-label="Language selection">
+          <a class="button button--primary" href="/fr/" data-language-option data-language="fr">
+            FR <span>Francais</span>
+          </a>
+          <a class="button button--secondary" href="/en/" data-language-option data-language="en">
+            EN <span>English</span>
+          </a>
+          <a class="button button--secondary" href="/de/" data-language-option data-language="de">
+            DE <span>Deutsch</span>
+          </a>
+        </div>
+      </section>
+    </main>
+    <script is:inline>
+      (() => {
+        const storageKey = 'constantinPreferredLanguage';
+
+        document.addEventListener('click', (event) => {
+          const link = event.target.closest('[data-language-option]');
+
+          if (!link) {
+            return;
+          }
+
+          try {
+            window.localStorage.setItem(storageKey, link.getAttribute('data-language'));
+          } catch {
+            // Language links keep working when storage is unavailable.
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+---
+import type {
+  GeneratedCvContinuousLearning,
+  GeneratedCvEducation,
+  SupportedLanguage
+} from '../lib/cvData';
+import { formatPeriod, uiText } from '../lib/localization';
+
+interface Props {
+  education: GeneratedCvEducation[];
+  continuousLearning: GeneratedCvContinuousLearning;
+  lang: SupportedLanguage;
+}
+
+const { education, continuousLearning, lang } = Astro.props as Props;
+const text = uiText[lang];
+---
+
+<section id="education" class="content-section" aria-labelledby="education-title">
+  <div class="section-heading">
+    <p class="section-kicker">{text.educationTitle}</p>
+    <h2 id="education-title">{text.educationTitle}</h2>
+  </div>
+
+  <div class="education-grid">
+    <div class="education-list">
+      {
+        education.map((item) => (
+          <article class="education-item">
+            <div class="education-item__marker" aria-hidden="true"></div>
+            <div class="education-item__content">
+              <h3>{item.degree}</h3>
+              <p class="education-item__institution">{item.institution}</p>
+              <span>{formatPeriod(item.period, lang)}</span>
+              <p>{item.description}</p>
+            </div>
+          </article>
+        ))
+      }
+    </div>
+
+    <aside class="learning-block">
+      <h3>{continuousLearning.title}</h3>
+      <ul class="plain-list">
+        {
+          continuousLearning.items.map((item) => (
+            <li>{item}</li>
+          ))
+        }
+      </ul>
+    </aside>
+  </div>
+</section>

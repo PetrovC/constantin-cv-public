@@ -1,0 +1,31 @@
+---
+import type { GeneratedCvSpokenLanguage, SupportedLanguage } from '../lib/cvData';
+import { uiText } from '../lib/localization';
+
+interface Props {
+  languages: GeneratedCvSpokenLanguage[];
+  lang: SupportedLanguage;
+}
+
+const { languages, lang } = Astro.props as Props;
+const text = uiText[lang];
+const sortedLanguages = [...languages].sort((a, b) => a.order - b.order);
+---
+
+<section id="languages" class="content-section" aria-labelledby="languages-title">
+  <div class="section-heading">
+    <p class="section-kicker">{text.languagesTitle}</p>
+    <h2 id="languages-title">{text.languagesTitle}</h2>
+  </div>
+
+  <ul class="language-list">
+    {
+      sortedLanguages.map((language) => (
+        <li>
+          <span class="language-list__name">{language.name}</span>
+          <strong>{language.level}</strong>
+        </li>
+      ))
+    }
+  </ul>
+</section>

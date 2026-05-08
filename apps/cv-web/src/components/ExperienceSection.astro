@@ -1,0 +1,80 @@
+---
+import type { GeneratedCvExperience, SupportedLanguage } from '../lib/cvData';
+import { formatPeriod, uiText } from '../lib/localization';
+
+interface Props {
+  experiences: GeneratedCvExperience[];
+  lang: SupportedLanguage;
+}
+
+const { experiences, lang } = Astro.props as Props;
+const text = uiText[lang];
+const getMissionAnchor = (missionId: string) => `mission-${missionId}`;
+const getMissionCountLabel = (count: number) =>
+  `${count} ${count === 1 ? text.missionSingularTitle : text.missionsTitle}`;
+---
+
+<section id="experience" class="content-section" aria-labelledby="experience-title">
+  <div class="section-heading">
+    <p class="section-kicker">{text.experienceTitle}</p>
+    <h2 id="experience-title">{text.experienceTitle}</h2>
+  </div>
+
+  <div class="experience-list">
+    {
+      experiences.map((experience) => (
+        <article id={`experience-${experience.id}`} class="experience-item">
+          <header class="experience-item__header">
+            <div>
+              <p class="experience-item__company">{experience.company}</p>
+              <h3>{experience.role}</h3>
+            </div>
+            <div class="experience-item__meta">
+              <span>{formatPeriod(experience.period, lang)}</span>
+              <span>{getMissionCountLabel(experience.missions.length)}</span>
+            </div>
+          </header>
+
+          {experience.missions.length > 0 && (
+            <>
+              {experience.missions.length > 1 && (
+                <nav class="mission-selector" aria-label={`${experience.company} ${text.missionsTitle}`}>
+                  {experience.missions.map((mission) => (
+                    <a href={`#${getMissionAnchor(mission.id)}`}>{mission.name}</a>
+                  ))}
+                </nav>
+              )}
+
+              <div class="mission-list" aria-label={text.missionsTitle}>
+              {experience.missions.map((mission) => (
+                <article id={getMissionAnchor(mission.id)} class="mission-card">
+                  <header class="mission-card__header">
+                    <p class="mission-card__name">{mission.name}</p>
+                    <h4>{mission.title}</h4>
+                  </header>
+
+                  {mission.tags.length > 0 && (
+                    <ul class="tag-list tag-list--mission" aria-label={text.tagsTitle}>
+                      {mission.tags.map((tag) => (
+                        <li>{tag}</li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {mission.bullets.length > 0 && (
+                    <ul class="plain-list">
+                      {mission.bullets.map((bullet) => (
+                        <li>{bullet}</li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+              </div>
+            </>
+          )}
+        </article>
+      ))
+    }
+  </div>
+</section>
