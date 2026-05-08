@@ -1,6 +1,7 @@
 ---
 import { supportedLanguages, type SupportedLanguage } from '../lib/cvData';
 import { uiText } from '../lib/localization';
+import { getLanguagePath } from '../lib/sitePaths';
 
 interface Props {
   currentLang?: SupportedLanguage;
@@ -21,7 +22,7 @@ const text = currentLang ? uiText[currentLang] : uiText.fr;
     supportedLanguages.map((language) => (
       <a
         class:list={['language-switcher__link', { 'is-active': language === currentLang }]}
-        href={`/${language}/`}
+        href={getLanguagePath(language)}
         aria-label={`${text.switchLanguageLabel} ${text.languageNames[language]}`}
         aria-current={language === currentLang ? 'page' : undefined}
         data-language-option

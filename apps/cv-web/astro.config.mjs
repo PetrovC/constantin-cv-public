@@ -6,8 +6,11 @@ import process from 'node:process';
 const require = createRequire(import.meta.url);
 const isPrintBuild = process.env.CV_WEB_BUILD_MODE === 'print';
 const astroPrerenderEntrypoint = require.resolve('astro/entrypoints/prerender');
+const publicBasePath = '/constantin-cv-public';
 
 export default defineConfig({
+  site: 'https://petrovc.github.io',
+  base: isPrintBuild ? undefined : publicBasePath,
   integrations: [vue()],
   outDir: isPrintBuild ? './dist-print' : './dist',
   vite: {

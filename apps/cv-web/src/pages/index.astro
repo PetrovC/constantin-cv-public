@@ -1,5 +1,11 @@
 ---
+import { supportedLanguages, type SupportedLanguage } from '../lib/cvData';
+import { getLanguagePath } from '../lib/sitePaths';
 import '../styles/global.css';
+
+const languagePaths = Object.fromEntries(
+  supportedLanguages.map((language) => [language, getLanguagePath(language)])
+) as Record<SupportedLanguage, string>;
 ---
 
 <!doctype html>
@@ -12,9 +18,9 @@ import '../styles/global.css';
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Constantin Petrov | CV & Portfolio</title>
-    <script is:inline>
+    <script define:vars={{ languagePaths }} is:inline>
       (() => {
-        const supportedLanguages = ['fr', 'en', 'de'];
+        const supportedLanguages = Object.keys(languagePaths);
         const storageKey = 'constantinPreferredLanguage';
         const fallbackLanguage = 'en';
 
@@ -45,7 +51,7 @@ import '../styles/global.css';
         };
 
         const language = getStoredLanguage() ?? getBrowserLanguage();
-        window.location.replace(`/${language}/`);
+        window.location.replace(languagePaths[language] ?? languagePaths[fallbackLanguage]);
       })();
     </script>
   </head>
@@ -62,13 +68,13 @@ import '../styles/global.css';
           <p>JavaScript is disabled, so automatic language detection is unavailable.</p>
         </noscript>
         <div class="language-choice-list" aria-label="Language selection">
-          <a class="button button--primary" href="/fr/" data-language-option data-language="fr">
+          <a class="button button--primary" href={languagePaths.fr} data-language-option data-language="fr">
             FR <span>Francais</span>
           </a>
-          <a class="button button--secondary" href="/en/" data-language-option data-language="en">
+          <a class="button button--secondary" href={languagePaths.en} data-language-option data-language="en">
             EN <span>English</span>
           </a>
-          <a class="button button--secondary" href="/de/" data-language-option data-language="de">
+          <a class="button button--secondary" href={languagePaths.de} data-language-option data-language="de">
             DE <span>Deutsch</span>
           </a>
         </div>
