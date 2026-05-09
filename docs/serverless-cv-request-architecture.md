@@ -3,11 +3,11 @@
 ## Status
 
 Partially implemented. The repository now contains a Cloudflare Worker scaffold
-for `POST /api/cv-requests` with validation and D1 persistence for pending
-requests.
+for `POST /api/cv-requests` with validation, D1 persistence for pending
+requests, and owner notification email sending through Resend after persistence.
 
-Email delivery, approval/rejection links, PDF delivery, rate limiting,
-retention cleanup, and spam protection are still future work.
+Approval/rejection links, requester PDF delivery, rate limiting, notification
+retry/audit, retention cleanup, and spam protection are still future work.
 
 ## Goal
 
@@ -27,8 +27,8 @@ The preferred target architecture is:
 visitor submits CV request form
 -> Worker validates payload
 -> Worker stores request in D1
+-> Worker sends an owner notification email through Resend
 -> Worker returns a pending request id
--> future Worker slice sends approval email to Constantin through Resend
 -> future approval/rejection and delivery flow runs after Constantin review
 ```
 
@@ -56,16 +56,21 @@ Private/backend configuration:
 - Private CV/PDF artifacts remain outside Git and outside the static public
   website build.
 
-## Required environment variables
+## Environment variables
+
+The current Worker notification path requires Resend and owner notification
+configuration in the Worker environment. These values must be configured outside
+source control.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `RESEND_API_KEY` | Yes | Resend API key used by the Worker for transactional emails. |
-| `APPROVAL_TOKEN_SECRET` | Yes | Secret used to sign and verify expiring approve/reject tokens. |
 | `OWNER_NOTIFICATION_EMAIL` | Yes | Destination for approval notification emails. Must not be in frontend code. |
-| `PUBLIC_SITE_URL` | Yes | Public website origin used for user-facing links and email copy. |
-| `REQUEST_RETENTION_DAYS` | Yes | Number of days to retain request personal data before deletion or anonymization. |
-| `TURNSTILE_SECRET_KEY` | No | Optional Cloudflare Turnstile secret for later spam protection. |
+| `OWNER_NOTIFICATION_FROM_EMAIL` | Yes | Sender address configured for the Resend sending domain. |
+| `PUBLIC_SITE_URL` | No | Optional public website origin used for email context. |
+| `APPROVAL_TOKEN_SECRET` | Future | Secret used to sign and verify expiring approve/reject tokens. |
+| `REQUEST_RETENTION_DAYS` | Future | Number of days to retain request personal data before deletion or anonymization. |
+| `TURNSTILE_SECRET_KEY` | Future optional | Optional Cloudflare Turnstile secret for later spam protection. |
 
 ## D1 data model
 
@@ -136,10 +141,14 @@ Responsibilities:
 - Apply rate limiting and basic spam prevention.
 - Optionally verify Turnstile when configured.
 - Insert a `pending` request into D1.
+- Send an owner notification email through Resend after persistence succeeds.
+- If notification sending fails, keep the stored request and return the same
+  generic `202 Accepted` response.
 - Return a `202 Accepted` response with the request id and pending status.
-- Send an approval notification email through Resend in a future implementation
-  slice.
 - Return `202 Accepted` without revealing approval outcome.
+
+Notification retry and audit logging will be handled in a later implementation
+slice.
 
 ### `GET /api/cv-requests/:id/approve?token=...`
 

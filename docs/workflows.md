@@ -85,8 +85,22 @@ npm run api:dev
 
 `POST /api/cv-requests` validates requests, stores valid requests in the local
 or configured Cloudflare D1 database with `pending` status, and exposes
-`GET /health`. It does not send emails, create approval links, approve or reject
-requests, or deliver PDFs.
+`GET /health`. After persistence succeeds, it sends an owner notification email
+through Resend using Worker environment configuration. If notification sending
+fails, the request remains stored and the API still returns a generic
+`202 Accepted` response; notification retry and audit will be handled later.
+
+It does not create approval links, approve or reject requests, or deliver PDFs.
+
+Configure notification values outside source control (`PUBLIC_SITE_URL` is
+optional context for the email):
+
+```txt
+RESEND_API_KEY
+OWNER_NOTIFICATION_EMAIL
+OWNER_NOTIFICATION_FROM_EMAIL
+PUBLIC_SITE_URL
+```
 
 Before deploying the Worker, create the Cloudflare D1 database with Wrangler and
 replace the placeholder `database_id` in:
