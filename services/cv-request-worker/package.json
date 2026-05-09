@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply cv-request-worker --local",
+    "db:migrate:remote": "wrangler d1 migrations apply cv-request-worker --remote",
     "dev": "wrangler dev",
     "test": "vitest run"
   },

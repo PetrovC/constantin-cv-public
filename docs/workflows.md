@@ -71,14 +71,35 @@ Run Worker TypeScript checks:
 npm run api:check
 ```
 
+Apply D1 migrations to the local Wrangler database:
+
+```powershell
+npm run db:migrate:local --workspace services/cv-request-worker
+```
+
 Run the local Worker dev server:
 
 ```powershell
 npm run api:dev
 ```
 
-The scaffold validates `POST /api/cv-requests` and exposes `GET /health`, but
-does not store requests, send emails, create approval links, or deliver PDFs.
+`POST /api/cv-requests` validates requests, stores valid requests in the local
+or configured Cloudflare D1 database with `pending` status, and exposes
+`GET /health`. It does not send emails, create approval links, approve or reject
+requests, or deliver PDFs.
+
+Before deploying the Worker, create the Cloudflare D1 database with Wrangler and
+replace the placeholder `database_id` in:
+
+```txt
+services/cv-request-worker/wrangler.toml
+```
+
+Then apply migrations to the remote D1 database:
+
+```powershell
+npm run db:migrate:remote --workspace services/cv-request-worker
+```
 
 ## Local private PDF generation
 
