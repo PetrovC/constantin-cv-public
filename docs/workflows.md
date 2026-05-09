@@ -101,12 +101,20 @@ then update the D1 status to `approved` or `rejected` and refresh `updatedAt`.
 Links are single-use through the current request status: once a request is no
 longer `pending`, approval/rejection returns `409 already_finalized`.
 
-If notification sending or approval-link generation fails, the request remains
-stored and the API still returns a generic `202 Accepted` response; notification
-retry and audit will be handled later.
+After approval or rejection is recorded, the Worker sends a requester decision
+notification through Resend. Approval notifications confirm that delivery will
+happen in a later follow-up step and do not include a CV file or private
+download link. Rejection notifications are polite and do not expose owner
+private contact data.
 
-It does not deliver PDFs, send the CV to requesters, or send requester rejection
-emails.
+If owner notification sending or approval-link generation fails, the request
+remains stored and the API still returns a generic `202 Accepted` response. If
+requester decision notification fails after approval or rejection, the decision
+status remains updated and the API returns a safe response explaining that the
+decision was recorded. Notification retry and audit will be handled later.
+
+It does not deliver PDFs, send the CV to requesters, attach PDFs, or create
+public/private download links.
 
 Configure notification values outside source control (`PUBLIC_SITE_URL` is
 optional context for the email):

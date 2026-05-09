@@ -5,10 +5,11 @@
 Partially implemented. The repository now contains a Cloudflare Worker scaffold
 for `POST /api/cv-requests` with validation, D1 persistence for pending
 requests, owner notification email sending through Resend after persistence,
-and signed approve/reject links that update request status in D1.
+and signed approve/reject links that update request status in D1 and send a
+decision notification email to the requester.
 
-Requester PDF delivery, requester email delivery, rate limiting, notification
-retry/audit, retention cleanup, and spam protection are still future work.
+Requester PDF delivery, temporary download links, notification retry/audit,
+retention cleanup, rate limiting, and spam protection are still future work.
 
 ## Goal
 
@@ -31,7 +32,8 @@ visitor submits CV request form
 -> Worker sends an owner notification email with signed approve/reject links
 -> Worker returns a pending request id
 -> Constantin approves or rejects with a signed link
--> future delivery flow runs after Constantin review
+-> Worker notifies the requester of the approval/rejection decision
+-> future CV delivery flow runs after Constantin review
 ```
 
 The public website remains a static GitHub Pages site. The form can later submit
@@ -61,8 +63,9 @@ Private/backend configuration:
 ## Environment variables
 
 The current Worker notification path requires Resend and owner notification
-configuration in the Worker environment. These values must be configured outside
-source control.
+configuration in the Worker environment. Requester decision notifications reuse
+the same Resend configuration and send only to the requester email stored in D1.
+These values must be configured outside source control.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -164,10 +167,16 @@ Responsibilities:
 - Enforce token expiry, action scope, and request scope.
 - Enforce single use by checking current D1 state.
 - Mark the request `approved`.
+- Send the requester an approval notification explaining that CV delivery will
+  happen in a later follow-up step.
+- If requester notification fails after the status update, keep the approved
+  status and return a safe response explaining that the decision was recorded.
 - Return `409 already_finalized` if the request is already approved, rejected,
   delivered, or expired.
-- Do not send the requested CV or a temporary access link yet.
-- Record an audit event if audit logging is enabled in a later slice.
+- Do not send the requested CV, attach a PDF, or create a temporary access link
+  yet.
+- Requester notification retry and audit logging will be handled in a later
+  slice.
 
 ### `GET /api/cv-requests/:id/reject?token=...`
 
@@ -180,10 +189,14 @@ Responsibilities:
 - Enforce token expiry, action scope, and request scope.
 - Enforce single use by checking current D1 state.
 - Mark the request `rejected`.
+- Send the requester a polite rejection notification.
+- If requester notification fails after the status update, keep the rejected
+  status and return a safe response explaining that the decision was recorded.
 - Return `409 already_finalized` if the request is already approved, rejected,
   delivered, or expired.
-- Do not send a requester rejection email yet.
-- Record an audit event if audit logging is enabled in a later slice.
+- Do not expose owner private contact data.
+- Requester notification retry and audit logging will be handled in a later
+  slice.
 
 ## Validation rules
 
