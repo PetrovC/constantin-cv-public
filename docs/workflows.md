@@ -32,6 +32,13 @@ Run .NET tests:
 dotnet test tools/CvGenerator/CvGenerator.sln
 ```
 
+Run CV request Worker validation:
+
+```powershell
+npm run api:check
+npm run api:test
+```
+
 Run Astro locally:
 
 ```powershell
@@ -43,6 +50,35 @@ Because the site uses the GitHub Pages base path, local URLs may include:
 ```txt
 http://localhost:4321/constantin-cv-public/fr/
 ```
+
+## Local CV request Worker development
+
+The CV request API scaffold lives under:
+
+```txt
+services/cv-request-worker
+```
+
+Run Worker tests:
+
+```powershell
+npm run api:test
+```
+
+Run Worker TypeScript checks:
+
+```powershell
+npm run api:check
+```
+
+Run the local Worker dev server:
+
+```powershell
+npm run api:dev
+```
+
+The scaffold validates `POST /api/cv-requests` and exposes `GET /health`, but
+does not store requests, send emails, create approval links, or deliver PDFs.
 
 ## Local private PDF generation
 
@@ -87,6 +123,8 @@ The PR workflow must run:
 ```powershell
 npm ci
 dotnet test tools/CvGenerator/CvGenerator.sln
+npm run api:check
+npm run api:test
 npm run cv:generate
 npm run build
 npm run privacy:check
@@ -131,6 +169,8 @@ Before pushing:
 ```powershell
 npm run cv:generate
 npm run build
+npm run api:check
+npm run api:test
 npm run privacy:check
 dotnet test tools/CvGenerator/CvGenerator.sln
 git diff --check
