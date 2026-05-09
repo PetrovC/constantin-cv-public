@@ -12,6 +12,8 @@ import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
 
 const workerOrigin = 'https://cv-request-worker.example.test';
+const allowedOrigin = 'https://portfolio.example.test';
+const disallowedOrigin = 'https://not-allowed.example.test';
 const approvalTokenSecret = 'test-approval-token-secret';
 const executionContext = {} as ExecutionContext;
 
@@ -31,6 +33,127 @@ describe('cv request worker', () => {
     const response = await fetchWorker('/health');
 
     await expectJson(response, 200, { status: 'ok' });
+  });
+
+  it('handles OPTIONS preflight for an allowed origin', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker('/api/cv-requests', {
+      method: 'OPTIONS',
+      headers: {
+        origin: allowedOrigin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type'
+      }
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe(allowedOrigin);
+    expect(response.headers.get('access-control-allow-methods')).toBe('POST, OPTIONS');
+    expect(response.headers.get('access-control-allow-headers')).toBe('content-type');
+    expect(response.headers.get('access-control-max-age')).toBe('600');
+    expect(response.headers.get('vary')).toContain('Origin');
+    expect(await response.text()).toBe('');
+  });
+
+  it('rejects OPTIONS preflight for a disallowed origin', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker('/api/cv-requests', {
+      method: 'OPTIONS',
+      headers: {
+        origin: disallowedOrigin,
+        'access-control-request-method': 'POST'
+      }
+    });
+
+    await expectJson(response, 403, {
+      status: 'disallowed_origin',
+      message: 'This origin is not allowed to access the CV request API.'
+    });
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('allows a POST from a configured origin through the normal request path', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness();
+    const response = await postCvRequest(validPayload, {
+      headers: {
+        origin: allowedOrigin
+      }
+    });
+    const body = (await response.json()) as { requestId: string; status: string };
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get('access-control-allow-origin')).toBe(allowedOrigin);
+    expect(body).toMatchObject({ status: 'pending' });
+    expect(db.inserts).toHaveLength(1);
+    expect(db.inserts[0].id).toBe(body.requestId);
+    expect(emailSender.notifications).toHaveLength(1);
+  });
+
+  it('rejects a POST from a disallowed origin before persistence', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness();
+    const response = await postCvRequest(validPayload, {
+      headers: {
+        origin: disallowedOrigin
+      }
+    });
+
+    await expectJson(response, 403, {
+      status: 'disallowed_origin',
+      message: 'This origin is not allowed to access the CV request API.'
+    });
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('rejects missing or invalid content types', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const missingContentTypeResponse = await fetchWorker('/api/cv-requests', {
+      method: 'POST',
+      body: JSON.stringify(validPayload)
+    });
+    const invalidContentTypeResponse = await fetchWorker('/api/cv-requests', {
+      method: 'POST',
+      headers: {
+        'content-type': 'text/plain'
+      },
+      body: JSON.stringify(validPayload)
+    });
+    const expectedBody = {
+      status: 'unsupported_content_type',
+      message: 'Send the request with Content-Type: application/json.'
+    };
+
+    await expectJson(missingContentTypeResponse, 415, expectedBody);
+    await expectJson(invalidContentTypeResponse, 415, expectedBody);
+  });
+
+  it('rejects invalid JSON before validation', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker('/api/cv-requests', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: '{'
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({ status: 'validation_error' });
+    expect(errorCodes(body)).toContainEqual(['body', 'invalid_json']);
+  });
+
+  it('adds security headers to API responses', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker('/health');
+
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    );
   });
 
   it('persists a valid request, sends the owner notification, and returns 202', async () => {
@@ -626,13 +749,14 @@ function createWorkerHarness(options: HarnessOptions = {}): {
   db: FakeD1Database;
   emailSender: FakeEmailSender;
   fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
-  postCvRequest: (payload: unknown) => Promise<Response>;
+  postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
 } {
   const db = new FakeD1Database(options);
   const emailSender = new FakeEmailSender(options);
   const testWorker = createWorker({ emailSender });
   const env: Env = {
     CV_REQUESTS_DB: db as unknown as D1Database,
+    ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
     RESEND_API_KEY: 'test-resend-api-key',
     OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
     OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
@@ -645,14 +769,17 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     return testWorker.fetch(new Request(url, init), env, executionContext);
   };
 
-  const postCvRequest = (payload: unknown): Promise<Response> =>
-    fetchWorker('/api/cv-requests', {
+  const postCvRequest = (payload: unknown, init: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set('content-type', headers.get('content-type') ?? 'application/json');
+
+    return fetchWorker('/api/cv-requests', {
+      ...init,
       method: 'POST',
-      headers: {
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(payload)
+      headers,
+      body: init.body ?? JSON.stringify(payload)
     });
+  };
 
   return { db, emailSender, fetchWorker, postCvRequest };
 }
@@ -672,7 +799,7 @@ async function createPendingRequest({
   postCvRequest
 }: {
   emailSender: FakeEmailSender;
-  postCvRequest: (payload: unknown) => Promise<Response>;
+  postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
 }): Promise<{
   requestId: string;
   approveUrl: string;
