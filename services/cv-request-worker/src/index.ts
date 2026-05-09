@@ -5,6 +5,7 @@ import {
 } from './approvalTokens';
 import { ResendEmailSender, type EmailSender } from './email';
 import { createInactiveRateLimiter, type RateLimiter } from './rateLimit';
+import { CloudflareTurnstileVerifier, type TurnstileVerifier } from './turnstile';
 import { validateCvRequestPayload } from './validation';
 
 export interface Env {
@@ -45,6 +46,7 @@ const preflightMaxAgeSeconds = '600';
 interface WorkerDependencies {
   emailSender?: EmailSender;
   rateLimiter?: RateLimiter<Env>;
+  turnstileVerifier?: TurnstileVerifier<Env>;
 }
 
 interface CvRequestWorker {
@@ -54,6 +56,8 @@ interface CvRequestWorker {
 export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWorker {
   const emailSender = dependencies.emailSender ?? new ResendEmailSender();
   const rateLimiter = dependencies.rateLimiter ?? createInactiveRateLimiter<Env>();
+  const turnstileVerifier =
+    dependencies.turnstileVerifier ?? new CloudflareTurnstileVerifier<Env>();
 
   return {
     async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -70,7 +74,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
       }
 
       if (request.method === 'POST' && url.pathname === '/api/cv-requests') {
-        return handleCvRequest(request, env, emailSender, rateLimiter, cors);
+        return handleCvRequest(request, env, emailSender, rateLimiter, turnstileVerifier, cors);
       }
 
       if (request.method === 'GET' && approvalRoute) {
@@ -136,6 +140,7 @@ async function handleCvRequest(
   env: Env,
   emailSender: EmailSender,
   rateLimiter: RateLimiter<Env>,
+  turnstileVerifier: TurnstileVerifier<Env>,
   cors: CorsContext
 ): Promise<Response> {
   if (cors.origin && !cors.allowedOrigin) {
@@ -176,6 +181,34 @@ async function handleCvRequest(
       400,
       cors
     );
+  }
+
+  const turnstileToken = readTurnstileToken(parsedBody.body);
+
+  if (!turnstileToken) {
+    return missingTurnstileTokenResponse(cors);
+  }
+
+  if (!env.TURNSTILE_SECRET_KEY?.trim()) {
+    return turnstileConfigurationErrorResponse(cors);
+  }
+
+  let turnstileVerification;
+
+  try {
+    turnstileVerification = await turnstileVerifier.verify(
+      {
+        token: turnstileToken,
+        remoteIp: readCfConnectingIp(request)
+      },
+      env
+    );
+  } catch {
+    return turnstileVerificationFailedResponse(cors);
+  }
+
+  if (!turnstileVerification.ok) {
+    return turnstileVerificationFailedResponse(cors);
   }
 
   const validation = validateCvRequestPayload(parsedBody.body);
@@ -498,6 +531,45 @@ function rateLimitedResponse(retryAfterSeconds: number, cors?: CorsContext): Res
   );
 }
 
+function missingTurnstileTokenResponse(cors?: CorsContext): Response {
+  return jsonResponse(
+    {
+      status: 'validation_error',
+      errors: [
+        {
+          field: 'turnstileToken',
+          code: 'required',
+          message: 'Complete the anti-spam check.'
+        }
+      ]
+    },
+    400,
+    cors
+  );
+}
+
+function turnstileConfigurationErrorResponse(cors?: CorsContext): Response {
+  return jsonResponse(
+    {
+      status: 'configuration_error',
+      message: 'The CV request service is not configured to accept submissions right now.'
+    },
+    503,
+    cors
+  );
+}
+
+function turnstileVerificationFailedResponse(cors?: CorsContext): Response {
+  return jsonResponse(
+    {
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.'
+    },
+    403,
+    cors
+  );
+}
+
 function methodNotAllowedResponse(pathname: string, cors?: CorsContext): Response {
   const allowedMethods = pathname === '/api/cv-requests' ? cvRequestsAllowedMethods : 'GET';
 
@@ -523,6 +595,22 @@ async function readJsonBody(request: Request): Promise<
   } catch {
     return { ok: false };
   }
+}
+
+function readTurnstileToken(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const token = (body as { turnstileToken?: unknown }).turnstileToken;
+  const trimmedToken = typeof token === 'string' ? token.trim() : '';
+
+  return trimmedToken ? trimmedToken : undefined;
+}
+
+function readCfConnectingIp(request: Request): string | undefined {
+  const remoteIp = request.headers.get('cf-connecting-ip')?.trim();
+  return remoteIp ? remoteIp : undefined;
 }
 
 function readCorsContext(request: Request, env: Env): CorsContext {

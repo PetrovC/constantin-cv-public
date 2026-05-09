@@ -24,7 +24,11 @@ export interface CvRequestPayload {
   reason: string;
 }
 
-export type CvRequestField = keyof CvRequestPayload | 'body';
+export interface CvRequestSubmissionPayload extends CvRequestPayload {
+  turnstileToken: string;
+}
+
+export type CvRequestField = keyof CvRequestSubmissionPayload | 'body';
 
 export type CvRequestValidationErrorCode =
   | 'required'

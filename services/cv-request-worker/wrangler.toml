@@ -4,7 +4,7 @@ compatibility_date = "2026-05-09"
 
 [vars]
 ALLOWED_ORIGINS = ""
-# TURNSTILE_SECRET_KEY is a secret binding for future spam protection.
+# Configure TURNSTILE_SECRET_KEY with `wrangler secret put TURNSTILE_SECRET_KEY`.
 
 [[d1_databases]]
 binding = "CV_REQUESTS_DB"
