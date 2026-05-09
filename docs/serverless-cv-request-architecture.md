@@ -4,9 +4,10 @@
 
 Partially implemented. The repository now contains a Cloudflare Worker scaffold
 for `POST /api/cv-requests` with validation, D1 persistence for pending
-requests, and owner notification email sending through Resend after persistence.
+requests, owner notification email sending through Resend after persistence,
+and signed approve/reject links that update request status in D1.
 
-Approval/rejection links, requester PDF delivery, rate limiting, notification
+Requester PDF delivery, requester email delivery, rate limiting, notification
 retry/audit, retention cleanup, and spam protection are still future work.
 
 ## Goal
@@ -27,9 +28,10 @@ The preferred target architecture is:
 visitor submits CV request form
 -> Worker validates payload
 -> Worker stores request in D1
--> Worker sends an owner notification email through Resend
+-> Worker sends an owner notification email with signed approve/reject links
 -> Worker returns a pending request id
--> future approval/rejection and delivery flow runs after Constantin review
+-> Constantin approves or rejects with a signed link
+-> future delivery flow runs after Constantin review
 ```
 
 The public website remains a static GitHub Pages site. The form can later submit
@@ -68,7 +70,7 @@ source control.
 | `OWNER_NOTIFICATION_EMAIL` | Yes | Destination for approval notification emails. Must not be in frontend code. |
 | `OWNER_NOTIFICATION_FROM_EMAIL` | Yes | Sender address configured for the Resend sending domain. |
 | `PUBLIC_SITE_URL` | No | Optional public website origin used for email context. |
-| `APPROVAL_TOKEN_SECRET` | Future | Secret used to sign and verify expiring approve/reject tokens. |
+| `APPROVAL_TOKEN_SECRET` | Yes | Secret used to sign and verify expiring approve/reject tokens. |
 | `REQUEST_RETENTION_DAYS` | Future | Number of days to retain request personal data before deletion or anonymization. |
 | `TURNSTILE_SECRET_KEY` | Future optional | Optional Cloudflare Turnstile secret for later spam protection. |
 
@@ -141,9 +143,10 @@ Responsibilities:
 - Apply rate limiting and basic spam prevention.
 - Optionally verify Turnstile when configured.
 - Insert a `pending` request into D1.
-- Send an owner notification email through Resend after persistence succeeds.
-- If notification sending fails, keep the stored request and return the same
-  generic `202 Accepted` response.
+- Generate signed approve/reject links after persistence succeeds.
+- Send an owner notification email through Resend after link generation.
+- If link generation or notification sending fails, keep the stored request and
+  return the same generic `202 Accepted` response.
 - Return a `202 Accepted` response with the request id and pending status.
 - Return `202 Accepted` without revealing approval outcome.
 
@@ -161,8 +164,10 @@ Responsibilities:
 - Enforce token expiry, action scope, and request scope.
 - Enforce single use by checking current D1 state.
 - Mark the request `approved`.
-- Send the requested CV or a temporary access link to the requester.
-- Record an audit event if audit logging is enabled.
+- Return `409 already_finalized` if the request is already approved, rejected,
+  delivered, or expired.
+- Do not send the requested CV or a temporary access link yet.
+- Record an audit event if audit logging is enabled in a later slice.
 
 ### `GET /api/cv-requests/:id/reject?token=...`
 
@@ -175,8 +180,10 @@ Responsibilities:
 - Enforce token expiry, action scope, and request scope.
 - Enforce single use by checking current D1 state.
 - Mark the request `rejected`.
-- Depending on configuration, send a polite refusal or send no requester email.
-- Record an audit event if audit logging is enabled.
+- Return `409 already_finalized` if the request is already approved, rejected,
+  delivered, or expired.
+- Do not send a requester rejection email yet.
+- Record an audit event if audit logging is enabled in a later slice.
 
 ## Validation rules
 
@@ -227,6 +234,7 @@ Basic spam prevention:
 - Approval and rejection links must use signed expiring tokens.
 - Tokens must be scoped to one request id and one action.
 - Tokens must be single-use through D1 state checks.
+- Current approval tokens expire after seven days.
 - Token values must never be stored in logs or public artifacts.
 - Rate limiting is required before production use.
 - Cloudflare Turnstile can be added when spam risk justifies it.

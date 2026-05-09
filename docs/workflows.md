@@ -86,11 +86,27 @@ npm run api:dev
 `POST /api/cv-requests` validates requests, stores valid requests in the local
 or configured Cloudflare D1 database with `pending` status, and exposes
 `GET /health`. After persistence succeeds, it sends an owner notification email
-through Resend using Worker environment configuration. If notification sending
-fails, the request remains stored and the API still returns a generic
-`202 Accepted` response; notification retry and audit will be handled later.
+through Resend using Worker environment configuration. The owner notification
+includes signed, expiring approve and reject links.
 
-It does not create approval links, approve or reject requests, or deliver PDFs.
+The Worker also exposes:
+
+```txt
+GET /api/cv-requests/:id/approve?token=...
+GET /api/cv-requests/:id/reject?token=...
+```
+
+Those links validate the token signature, token expiry, action, and request id,
+then update the D1 status to `approved` or `rejected` and refresh `updatedAt`.
+Links are single-use through the current request status: once a request is no
+longer `pending`, approval/rejection returns `409 already_finalized`.
+
+If notification sending or approval-link generation fails, the request remains
+stored and the API still returns a generic `202 Accepted` response; notification
+retry and audit will be handled later.
+
+It does not deliver PDFs, send the CV to requesters, or send requester rejection
+emails.
 
 Configure notification values outside source control (`PUBLIC_SITE_URL` is
 optional context for the email):
@@ -99,6 +115,7 @@ optional context for the email):
 RESEND_API_KEY
 OWNER_NOTIFICATION_EMAIL
 OWNER_NOTIFICATION_FROM_EMAIL
+APPROVAL_TOKEN_SECRET
 PUBLIC_SITE_URL
 ```
 

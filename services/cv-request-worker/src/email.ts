@@ -7,9 +7,15 @@ export interface EmailEnv {
   PUBLIC_SITE_URL?: string;
 }
 
+export interface OwnerActionLinks {
+  approve: string;
+  reject: string;
+}
+
 export interface OwnerNotificationEmail {
   requestId: string;
   payload: CvRequestPayload;
+  actionLinks: OwnerActionLinks;
 }
 
 export interface EmailSender {
@@ -48,7 +54,7 @@ export class ResendEmailSender implements EmailSender {
 }
 
 function buildOwnerNotificationText(
-  { requestId, payload }: OwnerNotificationEmail,
+  { requestId, payload, actionLinks }: OwnerNotificationEmail,
   publicSiteUrl?: string
 ): string {
   const publicSite = readOptionalConfig(publicSiteUrl);
@@ -66,6 +72,10 @@ function buildOwnerNotificationText(
     `Profile URL: ${profileUrl}`,
     `Requested CV type: ${payload.requestedCvType}`,
     `Requested language: ${payload.requestedLanguage}`,
+    '',
+    'Review actions:',
+    `Approve: ${actionLinks.approve}`,
+    `Reject: ${actionLinks.reject}`,
     '',
     'Reason/context:',
     payload.reason

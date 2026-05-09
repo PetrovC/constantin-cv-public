@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { createApprovalToken, type ApprovalAction } from '../src/approvalTokens';
 import { createWorker } from '../src/index';
 import type { EmailEnv, EmailSender, OwnerNotificationEmail } from '../src/email';
 import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
 
 const workerOrigin = 'https://cv-request-worker.example.test';
+const approvalTokenSecret = 'test-approval-token-secret';
 const executionContext = {} as ExecutionContext;
 
 const validPayload: CvRequestPayload = {
@@ -60,20 +62,29 @@ describe('cv request worker', () => {
     expect(db.inserts[0].createdAt).toBe(db.inserts[0].updatedAt);
     expect(Date.parse(db.inserts[0].createdAt)).not.toBeNaN();
 
-    expect(emailSender.notifications).toEqual([
-      {
-        env: expect.objectContaining({
-          RESEND_API_KEY: 'test-resend-api-key',
-          OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
-          OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
-          PUBLIC_SITE_URL: 'https://www.example.com'
-        }),
-        notification: {
-          requestId: body.requestId,
-          payload: validPayload
-        }
-      }
-    ]);
+    expect(emailSender.notifications).toHaveLength(1);
+    expect(emailSender.notifications[0].env).toEqual(
+      expect.objectContaining({
+        RESEND_API_KEY: 'test-resend-api-key',
+        OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
+        OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+        PUBLIC_SITE_URL: 'https://www.example.com'
+      })
+    );
+    expect(emailSender.notifications[0].notification).toMatchObject({
+      requestId: body.requestId,
+      payload: validPayload
+    });
+    expectOwnerActionLink(
+      emailSender.notifications[0].notification.actionLinks.approve,
+      body.requestId,
+      'approve'
+    );
+    expectOwnerActionLink(
+      emailSender.notifications[0].notification.actionLinks.reject,
+      body.requestId,
+      'reject'
+    );
   });
 
   it('keeps the request persisted and returns 202 when owner notification fails', async () => {
@@ -93,10 +104,165 @@ describe('cv request worker', () => {
     expect(db.inserts).toHaveLength(1);
     expect(db.inserts[0].id).toBe(body.requestId);
     expect(emailSender.notifications).toHaveLength(1);
-    expect(emailSender.notifications[0].notification).toEqual({
+    expect(emailSender.notifications[0].notification).toMatchObject({
       requestId: body.requestId,
-      payload: validPayload
+      payload: validPayload,
+      actionLinks: {
+        approve: expect.any(String),
+        reject: expect.any(String)
+      }
     });
+  });
+
+  it('adds approve and reject links to the owner notification', async () => {
+    const { emailSender, postCvRequest } = createWorkerHarness();
+    const response = await postCvRequest(validPayload);
+    const body = (await response.json()) as { requestId: string };
+    const notification = emailSender.notifications[0].notification;
+
+    expectOwnerActionLink(notification.actionLinks.approve, body.requestId, 'approve');
+    expectOwnerActionLink(notification.actionLinks.reject, body.requestId, 'reject');
+  });
+
+  it('approves a pending request with a valid approve link', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(approveUrl);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      status: 'approved',
+      message: 'CV request approved. No CV has been sent by this endpoint.'
+    });
+    expect(harness.db.find(requestId)).toMatchObject({
+      id: requestId,
+      status: 'approved'
+    });
+    expect(Date.parse(harness.db.find(requestId)?.updatedAt ?? '')).not.toBeNaN();
+  });
+
+  it('rejects a pending request with a valid reject link', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, rejectUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(rejectUrl);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      status: 'rejected',
+      message: 'CV request rejected. No requester email has been sent by this endpoint.'
+    });
+    expect(harness.db.find(requestId)).toMatchObject({
+      id: requestId,
+      status: 'rejected'
+    });
+  });
+
+  it('rejects an invalid approval token', async () => {
+    const harness = createWorkerHarness();
+    const { requestId } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=not-a-token`
+    );
+
+    await expectJson(response, 401, {
+      status: 'invalid_token',
+      message: 'The approval link is invalid or expired.'
+    });
+    expect(harness.db.find(requestId)?.status).toBe('pending');
+  });
+
+  it('rejects an expired approval token', async () => {
+    const harness = createWorkerHarness();
+    const { requestId } = await createPendingRequest(harness);
+    const expiredToken = await createApprovalToken({
+      requestId,
+      action: 'approve',
+      secret: approvalTokenSecret,
+      now: Date.now() - 60_000,
+      ttlSeconds: 1
+    });
+    const response = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=${expiredToken}`
+    );
+
+    await expectJson(response, 401, {
+      status: 'invalid_token',
+      message: 'The approval link is invalid or expired.'
+    });
+    expect(harness.db.find(requestId)?.status).toBe('pending');
+  });
+
+  it('rejects a token action mismatch', async () => {
+    const harness = createWorkerHarness();
+    const { requestId } = await createPendingRequest(harness);
+    const rejectToken = await createApprovalToken({
+      requestId,
+      action: 'reject',
+      secret: approvalTokenSecret
+    });
+    const response = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=${rejectToken}`
+    );
+
+    await expectJson(response, 403, {
+      status: 'invalid_token',
+      message: 'The approval link is invalid or expired.'
+    });
+    expect(harness.db.find(requestId)?.status).toBe('pending');
+  });
+
+  it('rejects a token request id mismatch', async () => {
+    const harness = createWorkerHarness();
+    const { requestId } = await createPendingRequest(harness);
+    const otherRequestId = '11111111-1111-4111-8111-111111111111';
+    const tokenForOtherRequest = await createApprovalToken({
+      requestId: otherRequestId,
+      action: 'approve',
+      secret: approvalTokenSecret
+    });
+    const response = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=${tokenForOtherRequest}`
+    );
+
+    await expectJson(response, 403, {
+      status: 'invalid_token',
+      message: 'The approval link is invalid or expired.'
+    });
+    expect(harness.db.find(requestId)?.status).toBe('pending');
+  });
+
+  it('returns 404 when the signed request id does not exist', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const unknownRequestId = '22222222-2222-4222-8222-222222222222';
+    const token = await createApprovalToken({
+      requestId: unknownRequestId,
+      action: 'approve',
+      secret: approvalTokenSecret
+    });
+    const response = await fetchWorker(
+      `/api/cv-requests/${unknownRequestId}/approve?token=${token}`
+    );
+
+    await expectJson(response, 404, {
+      status: 'not_found',
+      message: 'CV request was not found.'
+    });
+  });
+
+  it('returns 409 when the request has already been finalized', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const firstResponse = await harness.fetchWorker(approveUrl);
+    const secondResponse = await harness.fetchWorker(approveUrl);
+
+    expect(firstResponse.status).toBe(200);
+    await expectJson(secondResponse, 409, {
+      status: 'already_finalized',
+      message: 'This CV request has already been finalized.'
+    });
+    expect(harness.db.find(requestId)?.status).toBe('approved');
   });
 
   it('returns 503 when persistence fails', async () => {
@@ -312,50 +478,90 @@ class FakeD1Database {
 
   constructor(private readonly options: HarnessOptions = {}) {}
 
-  prepare(_query: string) {
+  prepare(query: string) {
+    const normalizedQuery = query.replace(/\s+/gu, ' ').trim().toLowerCase();
+
     return {
       bind: (...values: unknown[]) => ({
-        run: async () => {
-          if (this.options.failWrites) {
-            throw new Error('D1 write failed');
-          }
-
-          const [
-            id,
-            fullName,
-            requesterEmail,
-            company,
-            profileUrl,
-            requestedCvType,
-            requestedLanguage,
-            reason,
-            status,
-            createdAt,
-            updatedAt
-          ] = values;
-
-          this.inserts.push({
-            id: String(id),
-            fullName: String(fullName),
-            requesterEmail: String(requesterEmail),
-            company: String(company),
-            profileUrl: profileUrl === null ? null : String(profileUrl),
-            requestedCvType: String(requestedCvType),
-            requestedLanguage: String(requestedLanguage),
-            reason: String(reason),
-            status: String(status),
-            createdAt: String(createdAt),
-            updatedAt: String(updatedAt)
-          });
-
-          return {
-            success: true,
-            meta: {},
-            results: []
-          };
-        }
+        run: async () => this.run(normalizedQuery, values),
+        first: async <T>() => this.first<T>(normalizedQuery, values)
       })
     };
+  }
+
+  find(requestId: string): InsertedCvRequest | undefined {
+    return this.inserts.find((insertedRequest) => insertedRequest.id === requestId);
+  }
+
+  private async run(query: string, values: unknown[]) {
+    if (this.options.failWrites) {
+      throw new Error('D1 write failed');
+    }
+
+    if (query.startsWith('insert into cv_requests')) {
+      const [
+        id,
+        fullName,
+        requesterEmail,
+        company,
+        profileUrl,
+        requestedCvType,
+        requestedLanguage,
+        reason,
+        status,
+        createdAt,
+        updatedAt
+      ] = values;
+
+      this.inserts.push({
+        id: String(id),
+        fullName: String(fullName),
+        requesterEmail: String(requesterEmail),
+        company: String(company),
+        profileUrl: profileUrl === null ? null : String(profileUrl),
+        requestedCvType: String(requestedCvType),
+        requestedLanguage: String(requestedLanguage),
+        reason: String(reason),
+        status: String(status),
+        createdAt: String(createdAt),
+        updatedAt: String(updatedAt)
+      });
+
+      return fakeD1Result(1);
+    }
+
+    if (query.startsWith('update cv_requests')) {
+      const [status, updatedAt, id] = values;
+      const request = this.find(String(id));
+
+      if (!request || request.status !== 'pending') {
+        return fakeD1Result(0);
+      }
+
+      request.status = String(status);
+      request.updatedAt = String(updatedAt);
+
+      return fakeD1Result(1);
+    }
+
+    return fakeD1Result(0);
+  }
+
+  private async first<T>(query: string, values: unknown[]): Promise<T | null> {
+    if (query.startsWith('select id, status from cv_requests')) {
+      const request = this.find(String(values[0]));
+
+      if (!request) {
+        return null;
+      }
+
+      return {
+        id: request.id,
+        status: request.status
+      } as T;
+    }
+
+    return null;
   }
 }
 
@@ -373,11 +579,14 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     RESEND_API_KEY: 'test-resend-api-key',
     OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
     OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+    APPROVAL_TOKEN_SECRET: approvalTokenSecret,
     PUBLIC_SITE_URL: 'https://www.example.com'
   };
 
-  const fetchWorker = (path: string, init?: RequestInit): Promise<Response> =>
-    testWorker.fetch(new Request(`${workerOrigin}${path}`, init), env, executionContext);
+  const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
+    const url = path.startsWith('http') ? path : `${workerOrigin}${path}`;
+    return testWorker.fetch(new Request(url, init), env, executionContext);
+  };
 
   const postCvRequest = (payload: unknown): Promise<Response> =>
     fetchWorker('/api/cv-requests', {
@@ -389,6 +598,47 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     });
 
   return { db, emailSender, fetchWorker, postCvRequest };
+}
+
+function fakeD1Result(changes: number): D1Result {
+  return {
+    success: true,
+    meta: {
+      changes
+    },
+    results: []
+  } as unknown as D1Result;
+}
+
+async function createPendingRequest({
+  emailSender,
+  postCvRequest
+}: {
+  emailSender: FakeEmailSender;
+  postCvRequest: (payload: unknown) => Promise<Response>;
+}): Promise<{
+  requestId: string;
+  approveUrl: string;
+  rejectUrl: string;
+}> {
+  const response = await postCvRequest(validPayload);
+  const body = (await response.json()) as { requestId: string };
+  const notification = emailSender.notifications[0].notification;
+
+  return {
+    requestId: body.requestId,
+    approveUrl: notification.actionLinks.approve,
+    rejectUrl: notification.actionLinks.reject
+  };
+}
+
+function expectOwnerActionLink(link: string, requestId: string, action: ApprovalAction): void {
+  const url = new URL(link);
+
+  expect(url.origin).toBe(workerOrigin);
+  expect(url.pathname).toBe(`/api/cv-requests/${requestId}/${action}`);
+  expect(url.searchParams.get('token')).toEqual(expect.any(String));
+  expect(url.searchParams.get('token')).not.toHaveLength(0);
 }
 
 async function expectJson(
