@@ -18,8 +18,23 @@ export interface OwnerNotificationEmail {
   actionLinks: OwnerActionLinks;
 }
 
+export type RequesterDecision = 'approved' | 'rejected';
+
+export interface RequesterDecisionEmail {
+  requestId: string;
+  requesterName: string;
+  requesterEmail: string;
+  requestedCvType: CvRequestPayload['requestedCvType'];
+  requestedLanguage: CvRequestPayload['requestedLanguage'];
+  decision: RequesterDecision;
+}
+
 export interface EmailSender {
   sendOwnerNotification(env: EmailEnv, notification: OwnerNotificationEmail): Promise<void>;
+  sendRequesterDecisionNotification(
+    env: EmailEnv,
+    notification: RequesterDecisionEmail
+  ): Promise<void>;
 }
 
 export class ResendEmailSender implements EmailSender {
@@ -44,6 +59,38 @@ export class ResendEmailSender implements EmailSender {
         to,
         subject: `New CV request ${notification.requestId}`,
         text: buildOwnerNotificationText(notification, env.PUBLIC_SITE_URL)
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Resend email request failed with status ${response.status}.`);
+    }
+  }
+
+  async sendRequesterDecisionNotification(
+    env: EmailEnv,
+    notification: RequesterDecisionEmail
+  ): Promise<void> {
+    const apiKey = readRequiredConfig(env.RESEND_API_KEY, 'RESEND_API_KEY');
+    const from = readRequiredConfig(
+      env.OWNER_NOTIFICATION_FROM_EMAIL,
+      'OWNER_NOTIFICATION_FROM_EMAIL'
+    );
+
+    const response = await this.fetcher('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        from,
+        to: notification.requesterEmail,
+        subject:
+          notification.decision === 'approved'
+            ? 'Your CV request was approved'
+            : 'Your CV request update',
+        text: buildRequesterDecisionText(notification)
       })
     });
 
@@ -79,6 +126,31 @@ function buildOwnerNotificationText(
     '',
     'Reason/context:',
     payload.reason
+  ].join('\n');
+}
+
+function buildRequesterDecisionText(notification: RequesterDecisionEmail): string {
+  if (notification.decision === 'approved') {
+    return [
+      `Hello ${notification.requesterName},`,
+      '',
+      `Your request for Constantin Petrov's ${notification.requestedCvType} CV in ${notification.requestedLanguage} has been approved.`,
+      '',
+      'This message confirms the approval decision only. CV delivery will happen in a later follow-up step.',
+      'No CV file, attachment, or private download link is included in this email.',
+      '',
+      'Thank you.'
+    ].join('\n');
+  }
+
+  return [
+    `Hello ${notification.requesterName},`,
+    '',
+    "Thank you for your interest in Constantin Petrov's CV. After review, this request will not move forward.",
+    '',
+    'No CV file, attachment, or private download link is included in this email.',
+    '',
+    'Thank you for understanding.'
   ].join('\n');
 }
 

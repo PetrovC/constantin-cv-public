@@ -53,7 +53,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
       }
 
       if (request.method === 'GET' && approvalRoute) {
-        return handleApprovalAction(url, env, approvalRoute);
+        return handleApprovalAction(url, env, approvalRoute, emailSender);
       }
 
       if (url.pathname === '/health' || url.pathname === '/api/cv-requests' || approvalRoute) {
@@ -172,15 +172,20 @@ interface ApprovalRoute {
   action: ApprovalAction;
 }
 
-interface CvRequestStatusRow {
+interface CvRequestDecisionRow {
   id: string;
   status: string;
+  fullName: string;
+  requesterEmail: string;
+  requestedCvType: 'one-page' | 'full-dev';
+  requestedLanguage: 'fr' | 'en' | 'de';
 }
 
 async function handleApprovalAction(
   url: URL,
   env: Env,
-  route: ApprovalRoute
+  route: ApprovalRoute,
+  emailSender: EmailSender
 ): Promise<Response> {
   const token = url.searchParams.get('token')?.trim();
 
@@ -207,15 +212,17 @@ async function handleApprovalAction(
     return invalidApprovalLinkResponse(403);
   }
 
-  let existingRequest: CvRequestStatusRow | null;
+  let existingRequest: CvRequestDecisionRow | null;
 
   try {
     existingRequest =
       (await env.CV_REQUESTS_DB.prepare(
-        'SELECT id, status FROM cv_requests WHERE id = ?'
+        `SELECT id, status, fullName, requesterEmail, requestedCvType, requestedLanguage
+         FROM cv_requests
+         WHERE id = ?`
       )
         .bind(route.requestId)
-        .first<CvRequestStatusRow>()) ?? null;
+        .first<CvRequestDecisionRow>()) ?? null;
   } catch {
     return serviceUnavailableResponse();
   }
@@ -253,13 +260,26 @@ async function handleApprovalAction(
     return serviceUnavailableResponse();
   }
 
+  try {
+    await emailSender.sendRequesterDecisionNotification(env, {
+      requestId: existingRequest.id,
+      requesterName: existingRequest.fullName,
+      requesterEmail: existingRequest.requesterEmail,
+      requestedCvType: existingRequest.requestedCvType,
+      requestedLanguage: existingRequest.requestedLanguage,
+      decision: nextStatus
+    });
+  } catch {
+    return requesterNotificationFailedResponse(nextStatus);
+  }
+
   return jsonResponse(
     {
       status: nextStatus,
       message:
         route.action === 'approve'
-          ? 'CV request approved. No CV has been sent by this endpoint.'
-          : 'CV request rejected. No requester email has been sent by this endpoint.'
+          ? 'CV request approved. The requester was notified that CV delivery will happen in a later follow-up. No CV file or download link was sent.'
+          : 'CV request rejected. The requester was notified.'
     },
     200
   );
@@ -353,6 +373,17 @@ function serviceUnavailableResponse(): Response {
       message: 'The CV request service is temporarily unavailable. Try again later.'
     },
     503
+  );
+}
+
+function requesterNotificationFailedResponse(status: 'approved' | 'rejected'): Response {
+  return jsonResponse(
+    {
+      status,
+      message:
+        'The decision was recorded, but requester notification could not be sent right now. No CV file or download link was sent.'
+    },
+    200
   );
 }
 

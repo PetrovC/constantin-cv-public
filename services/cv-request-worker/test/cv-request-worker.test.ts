@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { createApprovalToken, type ApprovalAction } from '../src/approvalTokens';
 import { createWorker } from '../src/index';
-import type { EmailEnv, EmailSender, OwnerNotificationEmail } from '../src/email';
+import type {
+  EmailEnv,
+  EmailSender,
+  OwnerNotificationEmail,
+  RequesterDecisionEmail
+} from '../src/email';
 import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
 
@@ -124,7 +129,7 @@ describe('cv request worker', () => {
     expectOwnerActionLink(notification.actionLinks.reject, body.requestId, 'reject');
   });
 
-  it('approves a pending request with a valid approve link', async () => {
+  it('approves a pending request with a valid approve link and notifies the requester', async () => {
     const harness = createWorkerHarness();
     const { requestId, approveUrl } = await createPendingRequest(harness);
     const response = await harness.fetchWorker(approveUrl);
@@ -133,16 +138,18 @@ describe('cv request worker', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       status: 'approved',
-      message: 'CV request approved. No CV has been sent by this endpoint.'
+      message:
+        'CV request approved. The requester was notified that CV delivery will happen in a later follow-up. No CV file or download link was sent.'
     });
     expect(harness.db.find(requestId)).toMatchObject({
       id: requestId,
       status: 'approved'
     });
     expect(Date.parse(harness.db.find(requestId)?.updatedAt ?? '')).not.toBeNaN();
+    expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
   });
 
-  it('rejects a pending request with a valid reject link', async () => {
+  it('rejects a pending request with a valid reject link and notifies the requester', async () => {
     const harness = createWorkerHarness();
     const { requestId, rejectUrl } = await createPendingRequest(harness);
     const response = await harness.fetchWorker(rejectUrl);
@@ -151,12 +158,30 @@ describe('cv request worker', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({
       status: 'rejected',
-      message: 'CV request rejected. No requester email has been sent by this endpoint.'
+      message: 'CV request rejected. The requester was notified.'
     });
     expect(harness.db.find(requestId)).toMatchObject({
       id: requestId,
       status: 'rejected'
     });
+    expectRequesterDecisionNotification(harness.emailSender, requestId, 'rejected');
+  });
+
+  it('keeps the request approved when requester notification fails', async () => {
+    const harness = createWorkerHarness({ failRequesterEmail: true });
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(approveUrl);
+
+    await expectJson(response, 200, {
+      status: 'approved',
+      message:
+        'The decision was recorded, but requester notification could not be sent right now. No CV file or download link was sent.'
+    });
+    expect(harness.db.find(requestId)).toMatchObject({
+      id: requestId,
+      status: 'approved'
+    });
+    expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
   });
 
   it('rejects an invalid approval token', async () => {
@@ -171,6 +196,7 @@ describe('cv request worker', () => {
       message: 'The approval link is invalid or expired.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
   it('rejects an expired approval token', async () => {
@@ -192,6 +218,7 @@ describe('cv request worker', () => {
       message: 'The approval link is invalid or expired.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
   it('rejects a token action mismatch', async () => {
@@ -211,6 +238,7 @@ describe('cv request worker', () => {
       message: 'The approval link is invalid or expired.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
   it('rejects a token request id mismatch', async () => {
@@ -231,17 +259,18 @@ describe('cv request worker', () => {
       message: 'The approval link is invalid or expired.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
   it('returns 404 when the signed request id does not exist', async () => {
-    const { fetchWorker } = createWorkerHarness();
+    const harness = createWorkerHarness();
     const unknownRequestId = '22222222-2222-4222-8222-222222222222';
     const token = await createApprovalToken({
       requestId: unknownRequestId,
       action: 'approve',
       secret: approvalTokenSecret
     });
-    const response = await fetchWorker(
+    const response = await harness.fetchWorker(
       `/api/cv-requests/${unknownRequestId}/approve?token=${token}`
     );
 
@@ -249,6 +278,7 @@ describe('cv request worker', () => {
       status: 'not_found',
       message: 'CV request was not found.'
     });
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
   it('returns 409 when the request has already been finalized', async () => {
@@ -263,6 +293,7 @@ describe('cv request worker', () => {
       message: 'This CV request has already been finalized.'
     });
     expect(harness.db.find(requestId)?.status).toBe('approved');
+    expect(harness.emailSender.requesterNotifications).toHaveLength(1);
   });
 
   it('returns 503 when persistence fails', async () => {
@@ -449,6 +480,7 @@ interface InsertedCvRequest {
 interface HarnessOptions {
   failWrites?: boolean;
   failEmail?: boolean;
+  failRequesterEmail?: boolean;
 }
 
 interface SentOwnerNotification {
@@ -456,8 +488,14 @@ interface SentOwnerNotification {
   notification: OwnerNotificationEmail;
 }
 
+interface SentRequesterNotification {
+  env: EmailEnv;
+  notification: RequesterDecisionEmail;
+}
+
 class FakeEmailSender implements EmailSender {
   readonly notifications: SentOwnerNotification[] = [];
+  readonly requesterNotifications: SentRequesterNotification[] = [];
 
   constructor(private readonly options: HarnessOptions = {}) {}
 
@@ -469,6 +507,17 @@ class FakeEmailSender implements EmailSender {
 
     if (this.options.failEmail) {
       throw new Error('Email send failed');
+    }
+  }
+
+  async sendRequesterDecisionNotification(
+    env: EmailEnv,
+    notification: RequesterDecisionEmail
+  ): Promise<void> {
+    this.requesterNotifications.push({ env, notification });
+
+    if (this.options.failRequesterEmail) {
+      throw new Error('Requester email send failed');
     }
   }
 }
@@ -548,7 +597,11 @@ class FakeD1Database {
   }
 
   private async first<T>(query: string, values: unknown[]): Promise<T | null> {
-    if (query.startsWith('select id, status from cv_requests')) {
+    if (
+      query.startsWith(
+        'select id, status, fullname, requesteremail, requestedcvtype, requestedlanguage from cv_requests'
+      )
+    ) {
       const request = this.find(String(values[0]));
 
       if (!request) {
@@ -557,7 +610,11 @@ class FakeD1Database {
 
       return {
         id: request.id,
-        status: request.status
+        status: request.status,
+        fullName: request.fullName,
+        requesterEmail: request.requesterEmail,
+        requestedCvType: request.requestedCvType,
+        requestedLanguage: request.requestedLanguage
       } as T;
     }
 
@@ -639,6 +696,29 @@ function expectOwnerActionLink(link: string, requestId: string, action: Approval
   expect(url.pathname).toBe(`/api/cv-requests/${requestId}/${action}`);
   expect(url.searchParams.get('token')).toEqual(expect.any(String));
   expect(url.searchParams.get('token')).not.toHaveLength(0);
+}
+
+function expectRequesterDecisionNotification(
+  emailSender: FakeEmailSender,
+  requestId: string,
+  decision: 'approved' | 'rejected'
+): void {
+  expect(emailSender.requesterNotifications).toHaveLength(1);
+  expect(emailSender.requesterNotifications[0].env).toEqual(
+    expect.objectContaining({
+      RESEND_API_KEY: 'test-resend-api-key',
+      OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+      PUBLIC_SITE_URL: 'https://www.example.com'
+    })
+  );
+  expect(emailSender.requesterNotifications[0].notification).toEqual({
+    requestId,
+    requesterName: validPayload.fullName,
+    requesterEmail: validPayload.requesterEmail,
+    requestedCvType: validPayload.requestedCvType,
+    requestedLanguage: validPayload.requestedLanguage,
+    decision
+  });
 }
 
 async function expectJson(
