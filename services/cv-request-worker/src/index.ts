@@ -4,15 +4,18 @@ import {
   type ApprovalAction
 } from './approvalTokens';
 import { ResendEmailSender, type EmailSender } from './email';
+import { createInactiveRateLimiter, type RateLimiter } from './rateLimit';
 import { validateCvRequestPayload } from './validation';
 
 export interface Env {
   CV_REQUESTS_DB: D1Database;
+  ALLOWED_ORIGINS?: string;
   RESEND_API_KEY: string;
   OWNER_NOTIFICATION_EMAIL: string;
   OWNER_NOTIFICATION_FROM_EMAIL: string;
   APPROVAL_TOKEN_SECRET: string;
   PUBLIC_SITE_URL?: string;
+  TURNSTILE_SECRET_KEY?: string;
 }
 
 type JsonBody =
@@ -28,8 +31,20 @@ const jsonHeaders = {
   'cache-control': 'no-store'
 } as const;
 
+const securityHeaders = {
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'x-frame-options': 'DENY',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+} as const;
+
+const cvRequestsAllowedMethods = 'POST, OPTIONS';
+const cvRequestsAllowedHeaders = 'content-type';
+const preflightMaxAgeSeconds = '600';
+
 interface WorkerDependencies {
   emailSender?: EmailSender;
+  rateLimiter?: RateLimiter<Env>;
 }
 
 interface CvRequestWorker {
@@ -38,18 +53,24 @@ interface CvRequestWorker {
 
 export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWorker {
   const emailSender = dependencies.emailSender ?? new ResendEmailSender();
+  const rateLimiter = dependencies.rateLimiter ?? createInactiveRateLimiter<Env>();
 
   return {
     async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const approvalRoute = readApprovalRoute(url.pathname);
+      const cors = readCorsContext(request, env);
 
       if (request.method === 'GET' && url.pathname === '/health') {
         return jsonResponse({ status: 'ok' }, 200);
       }
 
+      if (request.method === 'OPTIONS' && url.pathname === '/api/cv-requests') {
+        return handleCvRequestPreflight(request, cors);
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/cv-requests') {
-        return handleCvRequest(request, env, emailSender);
+        return handleCvRequest(request, env, emailSender, rateLimiter, cors);
       }
 
       if (request.method === 'GET' && approvalRoute) {
@@ -57,7 +78,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
       }
 
       if (url.pathname === '/health' || url.pathname === '/api/cv-requests' || approvalRoute) {
-        return jsonResponse({ status: 'method_not_allowed', message: 'Method not allowed.' }, 405);
+        return methodNotAllowedResponse(url.pathname, cors);
       }
 
       return jsonResponse({ status: 'not_found', message: 'Not found.' }, 404);
@@ -69,11 +90,75 @@ const worker = createWorker();
 
 export default worker;
 
+interface CorsContext {
+  origin?: string;
+  allowedOrigin?: string;
+}
+
+function handleCvRequestPreflight(request: Request, cors: CorsContext): Response {
+  if (cors.origin && !cors.allowedOrigin) {
+    return disallowedOriginResponse();
+  }
+
+  if (!cors.origin) {
+    return jsonResponse(
+      {
+        status: 'disallowed_origin',
+        message: 'This origin is not allowed to access the CV request API.'
+      },
+      403
+    );
+  }
+
+  const requestedMethod = request.headers.get('access-control-request-method')?.trim();
+
+  if (requestedMethod?.toUpperCase() !== 'POST') {
+    return jsonResponse(
+      { status: 'method_not_allowed', message: 'Method not allowed.' },
+      405,
+      cors,
+      { allow: cvRequestsAllowedMethods }
+    );
+  }
+
+  return new Response(null, {
+    status: 204,
+    headers: createHeaders(undefined, cors, {
+      'access-control-allow-methods': cvRequestsAllowedMethods,
+      'access-control-allow-headers': cvRequestsAllowedHeaders,
+      'access-control-max-age': preflightMaxAgeSeconds
+    })
+  });
+}
+
 async function handleCvRequest(
   request: Request,
   env: Env,
-  emailSender: EmailSender
+  emailSender: EmailSender,
+  rateLimiter: RateLimiter<Env>,
+  cors: CorsContext
 ): Promise<Response> {
+  if (cors.origin && !cors.allowedOrigin) {
+    return disallowedOriginResponse();
+  }
+
+  if (!isJsonContentType(request.headers.get('content-type'))) {
+    return jsonResponse(
+      {
+        status: 'unsupported_content_type',
+        message: 'Send the request with Content-Type: application/json.'
+      },
+      415,
+      cors
+    );
+  }
+
+  const rateLimit = await rateLimiter.check(request, env);
+
+  if (!rateLimit.allowed) {
+    return rateLimitedResponse(rateLimit.retryAfterSeconds, cors);
+  }
+
   const parsedBody = await readJsonBody(request);
 
   if (!parsedBody.ok) {
@@ -88,14 +173,15 @@ async function handleCvRequest(
           }
         ]
       },
-      400
+      400,
+      cors
     );
   }
 
   const validation = validateCvRequestPayload(parsedBody.body);
 
   if (!validation.ok) {
-    return jsonResponse({ status: 'validation_error', errors: validation.errors }, 400);
+    return jsonResponse({ status: 'validation_error', errors: validation.errors }, 400, cors);
   }
 
   const requestId = crypto.randomUUID();
@@ -137,7 +223,8 @@ async function handleCvRequest(
         status: 'service_unavailable',
         message: 'The CV request service is temporarily unavailable. Try again later.'
       },
-      503
+      503,
+      cors
     );
   }
 
@@ -150,20 +237,21 @@ async function handleCvRequest(
       actionLinks
     });
   } catch {
-    return acceptedCvRequestResponse(requestId);
+    return acceptedCvRequestResponse(requestId, cors);
   }
 
-  return acceptedCvRequestResponse(requestId);
+  return acceptedCvRequestResponse(requestId, cors);
 }
 
-function acceptedCvRequestResponse(requestId: string): Response {
+function acceptedCvRequestResponse(requestId: string, cors?: CorsContext): Response {
   return jsonResponse(
     {
       requestId,
       status: 'pending',
       message: 'Your CV request was received and is pending review.'
     },
-    202
+    202,
+    cors
   );
 }
 
@@ -387,6 +475,40 @@ function requesterNotificationFailedResponse(status: 'approved' | 'rejected'): R
   );
 }
 
+function disallowedOriginResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'disallowed_origin',
+      message: 'This origin is not allowed to access the CV request API.'
+    },
+    403
+  );
+}
+
+function rateLimitedResponse(retryAfterSeconds: number, cors?: CorsContext): Response {
+  return jsonResponse(
+    {
+      status: 'rate_limited',
+      retryAfterSeconds,
+      message: 'Too many requests. Try again later.'
+    },
+    429,
+    cors,
+    { 'retry-after': String(retryAfterSeconds) }
+  );
+}
+
+function methodNotAllowedResponse(pathname: string, cors?: CorsContext): Response {
+  const allowedMethods = pathname === '/api/cv-requests' ? cvRequestsAllowedMethods : 'GET';
+
+  return jsonResponse(
+    { status: 'method_not_allowed', message: 'Method not allowed.' },
+    405,
+    cors,
+    { allow: allowedMethods }
+  );
+}
+
 async function readJsonBody(request: Request): Promise<
   | {
       ok: true;
@@ -403,9 +525,95 @@ async function readJsonBody(request: Request): Promise<
   }
 }
 
-function jsonResponse(body: JsonBody, status: number): Response {
+function readCorsContext(request: Request, env: Env): CorsContext {
+  const rawOrigin = request.headers.get('origin')?.trim();
+
+  if (!rawOrigin) {
+    return {};
+  }
+
+  const origin = normalizeOrigin(rawOrigin);
+
+  if (!origin) {
+    return { origin: rawOrigin };
+  }
+
+  return {
+    origin,
+    allowedOrigin: readAllowedOrigins(env.ALLOWED_ORIGINS).has(origin) ? origin : undefined
+  };
+}
+
+function readAllowedOrigins(value: string | undefined): Set<string> {
+  const origins = new Set<string>();
+
+  for (const part of value?.split(',') ?? []) {
+    const origin = normalizeOrigin(part);
+
+    if (origin) {
+      origins.add(origin);
+    }
+  }
+
+  return origins;
+}
+
+function normalizeOrigin(value: string | null | undefined): string | undefined {
+  const trimmedValue = value?.trim();
+
+  if (!trimmedValue) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmedValue);
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function isJsonContentType(contentType: string | null): boolean {
+  const mediaType = contentType?.split(';', 1)[0]?.trim().toLowerCase();
+  return mediaType === 'application/json';
+}
+
+function jsonResponse(
+  body: JsonBody,
+  status: number,
+  cors?: CorsContext,
+  extraHeaders?: HeadersInit
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: jsonHeaders
+    headers: createHeaders(jsonHeaders, cors, extraHeaders)
+  });
+}
+
+function createHeaders(
+  baseHeaders?: HeadersInit,
+  cors?: CorsContext,
+  extraHeaders?: HeadersInit
+): Headers {
+  const headers = new Headers(securityHeaders);
+
+  mergeHeaders(headers, baseHeaders);
+  mergeHeaders(headers, extraHeaders);
+
+  if (cors?.allowedOrigin) {
+    headers.set('access-control-allow-origin', cors.allowedOrigin);
+    headers.append('vary', 'Origin');
+  }
+
+  return headers;
+}
+
+function mergeHeaders(headers: Headers, values?: HeadersInit): void {
+  if (!values) {
+    return;
+  }
+
+  new Headers(values).forEach((value, key) => {
+    headers.set(key, value);
   });
 }

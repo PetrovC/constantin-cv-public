@@ -83,11 +83,12 @@ Run the local Worker dev server:
 npm run api:dev
 ```
 
-`POST /api/cv-requests` validates requests, stores valid requests in the local
-or configured Cloudflare D1 database with `pending` status, and exposes
-`GET /health`. After persistence succeeds, it sends an owner notification email
-through Resend using Worker environment configuration. The owner notification
-includes signed, expiring approve and reject links.
+`POST /api/cv-requests` enforces configured CORS origins for browser requests,
+requires `Content-Type: application/json`, validates requests, stores valid
+requests in the local or configured Cloudflare D1 database with `pending`
+status, and exposes `GET /health`. After persistence succeeds, it sends an
+owner notification email through Resend using Worker environment configuration.
+The owner notification includes signed, expiring approve and reject links.
 
 The Worker also exposes:
 
@@ -117,15 +118,25 @@ It does not deliver PDFs, send the CV to requesters, attach PDFs, or create
 public/private download links.
 
 Configure notification values outside source control (`PUBLIC_SITE_URL` is
-optional context for the email):
+optional context for the email). `ALLOWED_ORIGINS` is a comma-separated list of
+public origins that may call the Worker from a browser:
 
 ```txt
+ALLOWED_ORIGINS
 RESEND_API_KEY
 OWNER_NOTIFICATION_EMAIL
 OWNER_NOTIFICATION_FROM_EMAIL
 APPROVAL_TOKEN_SECRET
 PUBLIC_SITE_URL
 ```
+
+`TURNSTILE_SECRET_KEY` is prepared as an optional secret binding for later spam
+protection. It is not required yet, and the Worker does not verify Turnstile
+tokens until the public form is connected in a later task.
+
+The Worker currently has a rate-limiting abstraction only. Active rate limiting
+must be configured or implemented before connecting the public form; do not
+consider the current no-op default to be production protection.
 
 Before deploying the Worker, create the Cloudflare D1 database with Wrangler and
 replace the placeholder `database_id` in:

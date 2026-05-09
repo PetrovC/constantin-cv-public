@@ -6,10 +6,15 @@ Partially implemented. The repository now contains a Cloudflare Worker scaffold
 for `POST /api/cv-requests` with validation, D1 persistence for pending
 requests, owner notification email sending through Resend after persistence,
 and signed approve/reject links that update request status in D1 and send a
-decision notification email to the requester.
+decision notification email to the requester. The public request endpoint now
+has CORS allow-list handling, JSON content-type enforcement, safe JSON request
+errors, and basic security response headers.
 
 Requester PDF delivery, temporary download links, notification retry/audit,
-retention cleanup, rate limiting, and spam protection are still future work.
+retention cleanup, active rate limiting, and active spam protection are still
+future work. A rate-limiting abstraction exists in the Worker, but the default
+implementation is intentionally inactive until a Cloudflare-native or equivalent
+deployment mechanism is configured.
 
 ## Goal
 
@@ -72,10 +77,11 @@ These values must be configured outside source control.
 | `RESEND_API_KEY` | Yes | Resend API key used by the Worker for transactional emails. |
 | `OWNER_NOTIFICATION_EMAIL` | Yes | Destination for approval notification emails. Must not be in frontend code. |
 | `OWNER_NOTIFICATION_FROM_EMAIL` | Yes | Sender address configured for the Resend sending domain. |
+| `ALLOWED_ORIGINS` | Yes before public form connection | Comma-separated list of exact public origins allowed to call `POST /api/cv-requests` from browsers. Empty or missing values reject requests that include an `Origin` header. |
 | `PUBLIC_SITE_URL` | No | Optional public website origin used for email context. |
 | `APPROVAL_TOKEN_SECRET` | Yes | Secret used to sign and verify expiring approve/reject tokens. |
 | `REQUEST_RETENTION_DAYS` | Future | Number of days to retain request personal data before deletion or anonymization. |
-| `TURNSTILE_SECRET_KEY` | Future optional | Optional Cloudflare Turnstile secret for later spam protection. |
+| `TURNSTILE_SECRET_KEY` | Future optional | Optional Cloudflare Turnstile secret prepared in the Worker environment type for later spam protection. It is not required or verified yet. |
 
 ## D1 data model
 
@@ -139,12 +145,19 @@ Creates a pending request.
 
 Responsibilities:
 
+- Enforce CORS for browser requests by allowing only exact origins configured
+  in `ALLOWED_ORIGINS`.
+- Handle `OPTIONS` preflight for allowed origins.
+- Reject requests with a disallowed `Origin` before reading or storing the
+  payload.
+- Require `Content-Type: application/json`.
 - Parse JSON.
 - Trim string fields.
 - Validate required fields, maximum lengths, enum values, email format, and the
   optional URL format when provided.
-- Apply rate limiting and basic spam prevention.
-- Optionally verify Turnstile when configured.
+- Call the rate-limiting abstraction. The current default implementation allows
+  requests and is not active protection.
+- Optionally verify Turnstile when configured in a later slice.
 - Insert a `pending` request into D1.
 - Generate signed approve/reject links after persistence succeeds.
 - Send an owner notification email through Resend after link generation.
@@ -238,8 +251,12 @@ Basic spam prevention:
 
 - Reject empty or whitespace-only fields.
 - Reject obvious HTML/script payloads in free-text fields.
-- Rate-limit by IP or another Cloudflare-supported signal.
-- Optionally require Cloudflare Turnstile before production enablement.
+- Rate-limit by IP or another Cloudflare-supported signal before production
+  form connection. The current repository contains only the placeholder
+  abstraction, not active enforcement.
+- Require or verify Cloudflare Turnstile before production form connection if
+  spam risk justifies it. `TURNSTILE_SECRET_KEY` is prepared as an optional
+  environment binding, but verification is not active yet.
 - Avoid detailed error messages that help abuse automation.
 
 ## Security requirements
@@ -249,8 +266,14 @@ Basic spam prevention:
 - Tokens must be single-use through D1 state checks.
 - Current approval tokens expire after seven days.
 - Token values must never be stored in logs or public artifacts.
-- Rate limiting is required before production use.
-- Cloudflare Turnstile can be added when spam risk justifies it.
+- Browser access to `POST /api/cv-requests` must be restricted to
+  `ALLOWED_ORIGINS`.
+- API responses should include safe headers such as `X-Content-Type-Options:
+  nosniff` and `Referrer-Policy: no-referrer`.
+- Active rate limiting is required before production form connection. The
+  current Worker only has a replaceable inactive foundation.
+- Cloudflare Turnstile verification must be activated before connecting the
+  public form if it is selected as the spam protection layer.
 - CV download URLs must not be open public URLs.
 - Temporary access links, if used, must be signed, expiring, and scoped to the
   approved request.

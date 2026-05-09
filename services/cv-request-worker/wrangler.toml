@@ -2,6 +2,10 @@ name = "cv-request-worker"
 main = "src/index.ts"
 compatibility_date = "2026-05-09"
 
+[vars]
+ALLOWED_ORIGINS = ""
+# TURNSTILE_SECRET_KEY is a secret binding for future spam protection.
+
 [[d1_databases]]
 binding = "CV_REQUESTS_DB"
 database_name = "cv-request-worker"
