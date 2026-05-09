@@ -7,6 +7,7 @@
     "check": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply cv-request-worker --local",
     "db:migrate:remote": "wrangler d1 migrations apply cv-request-worker --remote",
+    "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "test": "vitest run"
   },
