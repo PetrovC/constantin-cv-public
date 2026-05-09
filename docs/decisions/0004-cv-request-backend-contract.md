@@ -30,14 +30,14 @@ The future request payload will contain:
 - `fullName`
 - `requesterEmail`
 - `company`
-- `profileUrl`
+- optional `profileUrl`
 - `requestedCvType`
 - `requestedLanguage`
 - `reason`
 
 The future backend must validate required fields, maximum lengths, email format,
-URL format, allowed CV types, and allowed languages before sending an approval
-email.
+the optional profile URL format when present, allowed CV types, and allowed
+languages before sending an approval email.
 
 Approval and rejection links must use signed, expiring tokens. Approved delivery
 may use either a temporary signed link or an attachment, but private CV files

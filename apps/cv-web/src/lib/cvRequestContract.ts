@@ -18,7 +18,7 @@ export interface CvRequestPayload {
   fullName: string;
   requesterEmail: string;
   company: string;
-  profileUrl: string;
+  profileUrl?: string;
   requestedCvType: CvRequestCvType;
   requestedLanguage: CvRequestLanguage;
   reason: string;

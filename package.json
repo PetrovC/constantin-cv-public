@@ -2,9 +2,13 @@
   "name": "constantin-cv",
   "private": true,
   "workspaces": [
-    "apps/cv-web"
+    "apps/cv-web",
+    "services/cv-request-worker"
   ],
   "scripts": {
+    "api:check": "npm run check --workspace services/cv-request-worker",
+    "api:dev": "npm run dev --workspace services/cv-request-worker",
+    "api:test": "npm run test --workspace services/cv-request-worker",
     "build:all": "npm run build && npm run pdf:generate",
     "build": "npm run cv:generate && npm run web:build",
     "cv:generate": "dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.csproj -- generate --input data/cv.yml --output generated",

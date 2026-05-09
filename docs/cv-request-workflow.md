@@ -48,7 +48,7 @@ interface CvRequestPayload {
   fullName: string;
   requesterEmail: string;
   company: string;
-  profileUrl: string;
+  profileUrl?: string;
   requestedCvType: 'one-page' | 'full-dev';
   requestedLanguage: 'fr' | 'en' | 'de';
   reason: string;
@@ -62,7 +62,7 @@ Field meanings:
 | `fullName` | Requester's full name. |
 | `requesterEmail` | Requester's professional contact email. |
 | `company` | Company, organization, or professional context. |
-| `profileUrl` | LinkedIn profile, company profile, or professional website URL. |
+| `profileUrl` | Optional LinkedIn profile, company profile, or professional website URL. |
 | `requestedCvType` | Private CV variant requested. |
 | `requestedLanguage` | Requested CV language. |
 | `reason` | Short professional reason for the request. |
@@ -79,7 +79,7 @@ Required fields:
 | `fullName` | Yes | 120 characters |
 | `requesterEmail` | Yes | 254 characters |
 | `company` | Yes | 160 characters |
-| `profileUrl` | Yes | 2048 characters |
+| `profileUrl` | No | 2048 characters |
 | `requestedCvType` | Yes | enum value |
 | `requestedLanguage` | Yes | enum value |
 | `reason` | Yes | 2000 characters |
@@ -88,7 +88,7 @@ Format and enum rules:
 
 - `requesterEmail` must be a syntactically valid email address with no display
   name wrapper.
-- `profileUrl` must be an absolute `https://` URL.
+- When provided, `profileUrl` must be an absolute `https://` URL.
 - `requestedCvType` must be one of:
   - `one-page`
   - `full-dev`
@@ -137,7 +137,7 @@ The approval email should include:
 
 - request summary;
 - requested CV type and language;
-- requester name, company, profile URL, and reason;
+- requester name, company, profile URL if provided, and reason;
 - approve link with a signed expiring token;
 - reject link with a signed expiring token.
 

@@ -81,7 +81,7 @@ Suggested fields:
 - `full_name`: trimmed requester name.
 - `requester_email`: trimmed requester email.
 - `company`: trimmed company or professional context.
-- `profile_url`: validated professional URL.
+- `profile_url`: optional validated professional URL.
 - `requested_cv_type`: allowed CV type.
 - `requested_language`: allowed language.
 - `reason`: trimmed request reason.
@@ -121,8 +121,8 @@ Responsibilities:
 
 - Parse JSON.
 - Trim string fields.
-- Validate required fields, maximum lengths, enum values, email format, and URL
-  format.
+- Validate required fields, maximum lengths, enum values, email format, and the
+  optional URL format when provided.
 - Apply rate limiting and basic spam prevention.
 - Optionally verify Turnstile when configured.
 - Insert a `pending` request into D1.
@@ -168,7 +168,7 @@ Required fields and maximum lengths:
 | `fullName` | Yes | 120 characters |
 | `requesterEmail` | Yes | 254 characters |
 | `company` | Yes | 160 characters |
-| `profileUrl` | Yes | 2048 characters |
+| `profileUrl` | No | 2048 characters |
 | `requestedCvType` | Yes | enum value |
 | `requestedLanguage` | Yes | enum value |
 | `reason` | Yes | 2000 characters |
@@ -188,7 +188,7 @@ Format rules:
 
 - `requesterEmail` must be a syntactically valid email address with no display
   name wrapper.
-- `profileUrl` must be an absolute `https://` URL.
+- When provided, `profileUrl` must be an absolute `https://` URL.
 - Unknown fields should be rejected if the original payload is stored or logged.
 - Normalization must not silently replace requester-provided identity, company,
   URL, or reason with generated content.
