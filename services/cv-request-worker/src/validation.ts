@@ -17,7 +17,34 @@ type StringField = keyof Pick<
   'fullName' | 'requesterEmail' | 'company' | 'profileUrl' | 'reason'
 >;
 
-const emailPattern = /^[^\s@<>()\[\]",;:]+@[^\s@<>()\[\]",;:]+\.[^\s@<>()\[\]",;:]+$/;
+const emailLimits = {
+  localPart: 64,
+  domain: 253,
+  domainLabel: 63
+} as const;
+
+const allowedLocalPartSymbols = new Set([
+  '!',
+  '#',
+  '$',
+  '%',
+  '&',
+  "'",
+  '*',
+  '+',
+  '-',
+  '/',
+  '=',
+  '?',
+  '^',
+  '_',
+  '`',
+  '{',
+  '|',
+  '}',
+  '~',
+  '.'
+]);
 
 export function validateCvRequestPayload(input: unknown): CvRequestValidationResult {
   if (!isObjectRecord(input)) {
@@ -179,7 +206,90 @@ function isRequestedLanguage(value: string): value is RequestedLanguage {
 }
 
 function isEmailLike(value: string): boolean {
-  return emailPattern.test(value);
+  if (value.length > cvRequestMaxLengths.requesterEmail || hasWhitespaceOrNonAscii(value)) {
+    return false;
+  }
+
+  const atIndex = value.indexOf('@');
+
+  if (atIndex <= 0 || atIndex !== value.lastIndexOf('@')) {
+    return false;
+  }
+
+  const localPart = value.slice(0, atIndex);
+  const domain = value.slice(atIndex + 1);
+
+  if (
+    localPart.length === 0 ||
+    localPart.length > emailLimits.localPart ||
+    domain.length === 0 ||
+    domain.length > emailLimits.domain ||
+    !domain.includes('.')
+  ) {
+    return false;
+  }
+
+  if (!hasOnlyAllowedLocalPartCharacters(localPart)) {
+    return false;
+  }
+
+  const labels = domain.split('.');
+
+  return labels.every(isValidDomainLabel);
+}
+
+function hasWhitespaceOrNonAscii(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.charCodeAt(0);
+
+    if (codePoint <= 32 || codePoint > 126) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasOnlyAllowedLocalPartCharacters(value: string): boolean {
+  for (const character of value) {
+    if (!isAllowedLocalPartCharacter(character)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isAllowedLocalPartCharacter(character: string): boolean {
+  return isAsciiLetterOrDigit(character) || allowedLocalPartSymbols.has(character);
+}
+
+function isValidDomainLabel(label: string): boolean {
+  if (label.length === 0 || label.length > emailLimits.domainLabel) {
+    return false;
+  }
+
+  if (label.startsWith('-') || label.endsWith('-')) {
+    return false;
+  }
+
+  for (const character of label) {
+    if (!isAsciiLetterOrDigit(character) && character !== '-') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isAsciiLetterOrDigit(character: string): boolean {
+  const codePoint = character.charCodeAt(0);
+
+  return (
+    (codePoint >= 48 && codePoint <= 57) ||
+    (codePoint >= 65 && codePoint <= 90) ||
+    (codePoint >= 97 && codePoint <= 122)
+  );
 }
 
 function isHttpsUrl(value: string): boolean {

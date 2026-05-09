@@ -35,6 +35,17 @@ describe('cv request worker', () => {
     });
   });
 
+  it('accepts a valid email address', async () => {
+    const response = await postCvRequest({
+      ...validPayload,
+      requesterEmail: 'alex.martin+cv@example.co.uk'
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(501);
+    expect(body).toMatchObject({ status: 'workflow_not_active' });
+  });
+
   it('accepts a valid payload without an optional profile URL', async () => {
     const { profileUrl: _profileUrl, ...payloadWithoutProfileUrl } = validPayload;
     const response = await postCvRequest(payloadWithoutProfileUrl);
@@ -71,6 +82,47 @@ describe('cv request worker', () => {
 
     expect(response.status).toBe(400);
     expect(errorCodes(body)).toContainEqual(['requesterEmail', 'invalid_email']);
+  });
+
+  it('returns 400 for malformed email shapes', async () => {
+    const malformedEmails = [
+      'alex@@example.com',
+      '@example.com',
+      'alex@',
+      'alex@example',
+      'alex@example..com',
+      'alex@-example.com',
+      'alex @example.com',
+      'alex@exa mple.com',
+      'alex@exam_ple.com'
+    ];
+
+    for (const requesterEmail of malformedEmails) {
+      const response = await postCvRequest({
+        ...validPayload,
+        requesterEmail
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(errorCodes(body)).toContainEqual(['requesterEmail', 'invalid_email']);
+    }
+  });
+
+  it('rejects pathological long email-like input without regex backtracking', async () => {
+    const response = await postCvRequest({
+      ...validPayload,
+      requesterEmail: `${'a'.repeat(5000)}@${'b'.repeat(5000)}.com`
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(errorCodes(body)).toEqual(
+      expect.arrayContaining([
+        ['requesterEmail', 'too_long'],
+        ['requesterEmail', 'invalid_email']
+      ])
+    );
   });
 
   it('returns 400 for an invalid profile URL', async () => {
