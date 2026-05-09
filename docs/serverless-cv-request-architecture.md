@@ -2,9 +2,12 @@
 
 ## Status
 
-Future architecture only. This document does not implement backend code,
-serverless functions, email delivery, database migrations, storage, or workflow
-changes.
+Partially implemented. The repository now contains a Cloudflare Worker scaffold
+for `POST /api/cv-requests` with validation and D1 persistence for pending
+requests.
+
+Email delivery, approval/rejection links, PDF delivery, rate limiting,
+retention cleanup, and spam protection are still future work.
 
 ## Goal
 
@@ -24,11 +27,9 @@ The preferred target architecture is:
 visitor submits CV request form
 -> Worker validates payload
 -> Worker stores request in D1
--> Worker sends approval email to Constantin through Resend
--> Constantin clicks approve or reject link
--> Worker validates signed expiring token
--> if approved, requester receives the CV or a temporary access link
--> if rejected, requester receives a polite refusal or no email depending on configuration
+-> Worker returns a pending request id
+-> future Worker slice sends approval email to Constantin through Resend
+-> future approval/rejection and delivery flow runs after Constantin review
 ```
 
 The public website remains a static GitHub Pages site. The form can later submit
@@ -68,8 +69,13 @@ Private/backend configuration:
 
 ## D1 data model
 
-The exact migration can be designed during implementation, but D1 should keep
-the model small.
+The initial D1 migration lives at:
+
+```txt
+services/cv-request-worker/migrations/0001_create_cv_requests.sql
+```
+
+The current model is intentionally small.
 
 ### `cv_requests`
 
@@ -78,16 +84,20 @@ Stores the current request and approval state.
 Suggested fields:
 
 - `id`: opaque request id.
-- `full_name`: trimmed requester name.
-- `requester_email`: trimmed requester email.
+- `fullName`: trimmed requester name.
+- `requesterEmail`: trimmed requester email.
 - `company`: trimmed company or professional context.
-- `profile_url`: optional validated professional URL.
-- `requested_cv_type`: allowed CV type.
-- `requested_language`: allowed language.
+- `profileUrl`: optional validated professional URL.
+- `requestedCvType`: allowed CV type.
+- `requestedLanguage`: allowed language.
 - `reason`: trimmed request reason.
 - `status`: `pending`, `approved`, `rejected`, `delivered`, or `expired`.
-- `created_at`: request creation timestamp.
-- `updated_at`: last state change timestamp.
+- `createdAt`: request creation timestamp.
+- `updatedAt`: last state change timestamp.
+
+Future workflow fields may be added when approval, delivery, retention cleanup,
+or abuse prevention are implemented:
+
 - `expires_at`: retention or request expiry timestamp.
 - `approved_at`: approval timestamp, when applicable.
 - `rejected_at`: rejection timestamp, when applicable.
@@ -126,7 +136,9 @@ Responsibilities:
 - Apply rate limiting and basic spam prevention.
 - Optionally verify Turnstile when configured.
 - Insert a `pending` request into D1.
-- Send an approval notification email through Resend.
+- Return a `202 Accepted` response with the request id and pending status.
+- Send an approval notification email through Resend in a future implementation
+  slice.
 - Return `202 Accepted` without revealing approval outcome.
 
 ### `GET /api/cv-requests/:id/approve?token=...`
