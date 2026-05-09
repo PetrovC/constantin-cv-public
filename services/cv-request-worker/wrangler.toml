@@ -8,8 +8,8 @@ compatibility_date = "2026-05-09"
 [vars]
 # Keep committed values empty. Set deployment-specific values locally or in the
 # Cloudflare Worker environment before deploying.
-ALLOWED_ORIGINS = ""
-PUBLIC_SITE_URL = ""
+ALLOWED_ORIGINS = "https://petrovc.github.io"
+PUBLIC_SITE_URL = "https://cv-request-worker.constantin-cv.workers.dev"
 
 # Configure secrets with `wrangler secret put`:
 # RESEND_API_KEY
@@ -19,8 +19,8 @@ PUBLIC_SITE_URL = ""
 # TURNSTILE_SECRET_KEY
 
 [[d1_databases]]
-binding = "CV_REQUESTS_DB"
-database_name = "cv-request-worker"
+binding = "constantin_cv_requests"
+database_name = "constantin-cv-requests"
 # Replace this all-zero placeholder with the real D1 database id only in local
 # deployment config. Do not commit a real database_id.
 database_id = "00000000-0000-0000-0000-000000000000"
