@@ -7,14 +7,15 @@ for `POST /api/cv-requests` with validation, D1 persistence for pending
 requests, owner notification email sending through Resend after persistence,
 and signed approve/reject links that update request status in D1 and send a
 decision notification email to the requester. The public request endpoint now
-has CORS allow-list handling, JSON content-type enforcement, safe JSON request
-errors, and basic security response headers.
+has CORS allow-list handling, JSON content-type enforcement, Cloudflare
+Turnstile server-side verification, safe JSON request errors, and basic
+security response headers.
 
 Requester PDF delivery, temporary download links, notification retry/audit,
-retention cleanup, active rate limiting, and active spam protection are still
-future work. A rate-limiting abstraction exists in the Worker, but the default
-implementation is intentionally inactive until a Cloudflare-native or equivalent
-deployment mechanism is configured.
+retention cleanup, and active rate limiting are still future work. A
+rate-limiting abstraction exists in the Worker, but the default implementation
+is intentionally inactive until a Cloudflare-native or equivalent deployment
+mechanism is configured.
 
 ## Goal
 
@@ -32,6 +33,7 @@ The preferred target architecture is:
 
 ```txt
 visitor submits CV request form
+-> Worker verifies the Turnstile token server-side
 -> Worker validates payload
 -> Worker stores request in D1
 -> Worker sends an owner notification email with signed approve/reject links
@@ -70,7 +72,8 @@ Private/backend configuration:
 The current Worker notification path requires Resend and owner notification
 configuration in the Worker environment. Requester decision notifications reuse
 the same Resend configuration and send only to the requester email stored in D1.
-These values must be configured outside source control.
+Turnstile verification is required for request submissions. These values must
+be configured outside source control.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -80,8 +83,8 @@ These values must be configured outside source control.
 | `ALLOWED_ORIGINS` | Yes before public form connection | Comma-separated list of exact public origins allowed to call `POST /api/cv-requests` from browsers. Empty or missing values reject requests that include an `Origin` header. |
 | `PUBLIC_SITE_URL` | No | Optional public website origin used for email context. |
 | `APPROVAL_TOKEN_SECRET` | Yes | Secret used to sign and verify expiring approve/reject tokens. |
+| `TURNSTILE_SECRET_KEY` | Yes | Cloudflare Turnstile secret used by the Worker to verify `turnstileToken` with Siteverify. Must be configured as a secret binding, not source. |
 | `REQUEST_RETENTION_DAYS` | Future | Number of days to retain request personal data before deletion or anonymization. |
-| `TURNSTILE_SECRET_KEY` | Future optional | Optional Cloudflare Turnstile secret prepared in the Worker environment type for later spam protection. It is not required or verified yet. |
 
 ## D1 data model
 
@@ -152,12 +155,16 @@ Responsibilities:
   payload.
 - Require `Content-Type: application/json`.
 - Parse JSON.
+- Call the rate-limiting abstraction. The current default implementation allows
+  requests and is not active protection.
+- Require a non-empty `turnstileToken` in the JSON body.
+- Reject submissions with `503` when `TURNSTILE_SECRET_KEY` is missing.
+- Verify the token through Cloudflare Siteverify with the configured secret and
+  include `CF-Connecting-IP` as `remoteip` when available.
+- Reject failed Turnstile verification with `403`.
 - Trim string fields.
 - Validate required fields, maximum lengths, enum values, email format, and the
   optional URL format when provided.
-- Call the rate-limiting abstraction. The current default implementation allows
-  requests and is not active protection.
-- Optionally verify Turnstile when configured in a later slice.
 - Insert a `pending` request into D1.
 - Generate signed approve/reject links after persistence succeeds.
 - Send an owner notification email through Resend after link generation.
@@ -215,6 +222,10 @@ Responsibilities:
 
 The Worker must trim surrounding whitespace before validation.
 
+The JSON submission also includes `turnstileToken`. The Worker verifies that
+token before CV payload validation and does not store it in D1 or include it in
+email notifications.
+
 Required fields and maximum lengths:
 
 | Field | Required | Maximum length |
@@ -254,9 +265,7 @@ Basic spam prevention:
 - Rate-limit by IP or another Cloudflare-supported signal before production
   form connection. The current repository contains only the placeholder
   abstraction, not active enforcement.
-- Require or verify Cloudflare Turnstile before production form connection if
-  spam risk justifies it. `TURNSTILE_SECRET_KEY` is prepared as an optional
-  environment binding, but verification is not active yet.
+- Require Cloudflare Turnstile verification for every request submission.
 - Avoid detailed error messages that help abuse automation.
 
 ## Security requirements
@@ -272,8 +281,8 @@ Basic spam prevention:
   nosniff` and `Referrer-Policy: no-referrer`.
 - Active rate limiting is required before production form connection. The
   current Worker only has a replaceable inactive foundation.
-- Cloudflare Turnstile verification must be activated before connecting the
-  public form if it is selected as the spam protection layer.
+- Cloudflare Turnstile verification is active for request submissions, but the
+  public form is not connected to the API yet.
 - CV download URLs must not be open public URLs.
 - Temporary access links, if used, must be signed, expiring, and scoped to the
   approved request.

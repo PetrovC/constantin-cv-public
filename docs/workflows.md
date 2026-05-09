@@ -84,8 +84,9 @@ npm run api:dev
 ```
 
 `POST /api/cv-requests` enforces configured CORS origins for browser requests,
-requires `Content-Type: application/json`, validates requests, stores valid
-requests in the local or configured Cloudflare D1 database with `pending`
+requires `Content-Type: application/json`, requires a `turnstileToken`, verifies
+that token server-side with Cloudflare Turnstile, validates requests, stores
+valid requests in the local or configured Cloudflare D1 database with `pending`
 status, and exposes `GET /health`. After persistence succeeds, it sends an
 owner notification email through Resend using Worker environment configuration.
 The owner notification includes signed, expiring approve and reject links.
@@ -119,7 +120,9 @@ public/private download links.
 
 Configure notification values outside source control (`PUBLIC_SITE_URL` is
 optional context for the email). `ALLOWED_ORIGINS` is a comma-separated list of
-public origins that may call the Worker from a browser:
+public origins that may call the Worker from a browser. Configure
+`TURNSTILE_SECRET_KEY` as a Worker secret, for example with
+`wrangler secret put TURNSTILE_SECRET_KEY`; do not store the value in source:
 
 ```txt
 ALLOWED_ORIGINS
@@ -127,12 +130,13 @@ RESEND_API_KEY
 OWNER_NOTIFICATION_EMAIL
 OWNER_NOTIFICATION_FROM_EMAIL
 APPROVAL_TOKEN_SECRET
+TURNSTILE_SECRET_KEY
 PUBLIC_SITE_URL
 ```
 
-`TURNSTILE_SECRET_KEY` is prepared as an optional secret binding for later spam
-protection. It is not required yet, and the Worker does not verify Turnstile
-tokens until the public form is connected in a later task.
+If `TURNSTILE_SECRET_KEY` is missing, `POST /api/cv-requests` rejects
+submissions with a safe `503` configuration response before persistence or
+email sending. Failed Turnstile verification returns `403`.
 
 The Worker currently has a rate-limiting abstraction only. Active rate limiting
 must be configured or implemented before connecting the public form; do not

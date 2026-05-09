@@ -10,11 +10,18 @@ import type {
 } from '../src/email';
 import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
+import {
+  CloudflareTurnstileVerifier,
+  type TurnstileVerificationInput,
+  type TurnstileVerifier
+} from '../src/turnstile';
 
 const workerOrigin = 'https://cv-request-worker.example.test';
 const allowedOrigin = 'https://portfolio.example.test';
 const disallowedOrigin = 'https://not-allowed.example.test';
 const approvalTokenSecret = 'test-approval-token-secret';
+const turnstileSecret = 'test-turnstile-secret';
+const validTurnstileToken = 'test-turnstile-token';
 const executionContext = {} as ExecutionContext;
 
 const validPayload: CvRequestPayload = {
@@ -33,6 +40,43 @@ describe('cv request worker', () => {
     const response = await fetchWorker('/health');
 
     await expectJson(response, 200, { status: 'ok' });
+  });
+
+  it('posts Turnstile verification to Cloudflare Siteverify', async () => {
+    let siteverifyUrl: string | undefined;
+    let siteverifyInit: RequestInit | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      siteverifyUrl = String(input);
+      siteverifyInit = init;
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    };
+    const verifier = new CloudflareTurnstileVerifier(fetcher);
+    const result = await verifier.verify(
+      {
+        token: 'site-token',
+        remoteIp: '203.0.113.10'
+      },
+      {
+        TURNSTILE_SECRET_KEY: 'site-secret'
+      }
+    );
+    const form = siteverifyInit?.body as URLSearchParams;
+
+    expect(result).toEqual({ ok: true });
+    expect(siteverifyUrl).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
+    expect(siteverifyInit?.method).toBe('POST');
+    expect(new Headers(siteverifyInit?.headers).get('content-type')).toBe(
+      'application/x-www-form-urlencoded'
+    );
+    expect(form.get('secret')).toBe('site-secret');
+    expect(form.get('response')).toBe('site-token');
+    expect(form.get('remoteip')).toBe('203.0.113.10');
   });
 
   it('handles OPTIONS preflight for an allowed origin', async () => {
@@ -142,6 +186,78 @@ describe('cv request worker', () => {
     expect(response.status).toBe(400);
     expect(body).toMatchObject({ status: 'validation_error' });
     expect(errorCodes(body)).toContainEqual(['body', 'invalid_json']);
+  });
+
+  it('returns 400 when the Turnstile token is missing', async () => {
+    const { db, emailSender, postCvRequest, turnstileVerifier } = createWorkerHarness();
+    const response = await postCvRequest(validPayload, {
+      body: JSON.stringify(validPayload)
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({ status: 'validation_error' });
+    expect(errorCodes(body)).toContainEqual(['turnstileToken', 'required']);
+    expect(turnstileVerifier.verifications).toHaveLength(0);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('returns 503 when TURNSTILE_SECRET_KEY is missing', async () => {
+    const { db, emailSender, postCvRequest, turnstileVerifier } = createWorkerHarness({
+      omitTurnstileSecret: true
+    });
+    const response = await postCvRequest(validPayload);
+
+    await expectJson(response, 503, {
+      status: 'configuration_error',
+      message: 'The CV request service is not configured to accept submissions right now.'
+    });
+    expect(turnstileVerifier.verifications).toHaveLength(0);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('returns 403 when Turnstile verification fails', async () => {
+    const { postCvRequest, turnstileVerifier } = createWorkerHarness({
+      failTurnstile: true
+    });
+    const response = await postCvRequest(validPayload);
+
+    await expectJson(response, 403, {
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.'
+    });
+    expect(turnstileVerifier.verifications).toHaveLength(1);
+  });
+
+  it('does not persist or send email when Turnstile verification fails', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness({
+      failTurnstile: true
+    });
+    const response = await postCvRequest(validPayload);
+
+    expect(response.status).toBe(403);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('continues the normal request flow after successful Turnstile verification', async () => {
+    const { db, emailSender, postCvRequest, turnstileVerifier } = createWorkerHarness();
+    const response = await postCvRequest(validPayload, {
+      headers: {
+        'cf-connecting-ip': '203.0.113.9'
+      }
+    });
+
+    expect(response.status).toBe(202);
+    expect(turnstileVerifier.verifications).toHaveLength(1);
+    expect(turnstileVerifier.verifications[0].input).toEqual({
+      token: validTurnstileToken,
+      remoteIp: '203.0.113.9'
+    });
+    expect(db.inserts).toHaveLength(1);
+    expect(emailSender.notifications).toHaveLength(1);
   });
 
   it('adds security headers to API responses', async () => {
@@ -604,6 +720,8 @@ interface HarnessOptions {
   failWrites?: boolean;
   failEmail?: boolean;
   failRequesterEmail?: boolean;
+  failTurnstile?: boolean;
+  omitTurnstileSecret?: boolean;
 }
 
 interface SentOwnerNotification {
@@ -642,6 +760,23 @@ class FakeEmailSender implements EmailSender {
     if (this.options.failRequesterEmail) {
       throw new Error('Requester email send failed');
     }
+  }
+}
+
+interface TurnstileVerificationCall {
+  input: TurnstileVerificationInput;
+  env: Env;
+}
+
+class FakeTurnstileVerifier implements TurnstileVerifier<Env> {
+  readonly verifications: TurnstileVerificationCall[] = [];
+
+  constructor(private readonly options: HarnessOptions = {}) {}
+
+  async verify(input: TurnstileVerificationInput, env: Env) {
+    this.verifications.push({ input, env });
+
+    return this.options.failTurnstile ? { ok: false as const } : { ok: true as const };
   }
 }
 
@@ -748,12 +883,14 @@ class FakeD1Database {
 function createWorkerHarness(options: HarnessOptions = {}): {
   db: FakeD1Database;
   emailSender: FakeEmailSender;
+  turnstileVerifier: FakeTurnstileVerifier;
   fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
   postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
 } {
   const db = new FakeD1Database(options);
   const emailSender = new FakeEmailSender(options);
-  const testWorker = createWorker({ emailSender });
+  const turnstileVerifier = new FakeTurnstileVerifier(options);
+  const testWorker = createWorker({ emailSender, turnstileVerifier });
   const env: Env = {
     CV_REQUESTS_DB: db as unknown as D1Database,
     ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
@@ -761,7 +898,8 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
     OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
     APPROVAL_TOKEN_SECRET: approvalTokenSecret,
-    PUBLIC_SITE_URL: 'https://www.example.com'
+    PUBLIC_SITE_URL: 'https://www.example.com',
+    TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret
   };
 
   const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
@@ -777,11 +915,26 @@ function createWorkerHarness(options: HarnessOptions = {}): {
       ...init,
       method: 'POST',
       headers,
-      body: init.body ?? JSON.stringify(payload)
+      body: init.body ?? JSON.stringify(withTurnstileToken(payload))
     });
   };
 
-  return { db, emailSender, fetchWorker, postCvRequest };
+  return { db, emailSender, turnstileVerifier, fetchWorker, postCvRequest };
+}
+
+function withTurnstileToken(payload: unknown): unknown {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return payload;
+  }
+
+  if ('turnstileToken' in payload) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    turnstileToken: validTurnstileToken
+  };
 }
 
 function fakeD1Result(changes: number): D1Result {
