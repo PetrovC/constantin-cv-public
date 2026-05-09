@@ -1,37 +1,107 @@
 # Roadmap
 
-## Phase 1: Bootstrap
+## Completed foundations
 
-- Create documentation.
-- Create a minimal multilingual `data/cv.yml`.
-- Create the .NET solution skeleton.
-- Create the Astro + Vue website skeleton.
-- Keep validation and generation minimal.
+- Public-safe repository structure.
+- Public CV source in `data/cv.yml`.
+- Private overlay pattern in `data/private/cv.private.yml`.
+- .NET CV validation.
+- Public web JSON generation.
+- Astro multilingual portfolio.
+- GitHub Pages deployment.
+- CI and privacy checks.
+- Local/private PDF generation foundation.
+- Public CV request form placeholder.
 
-## Phase 2: CV Validation
+## Next milestones
 
-- Parse the YAML source of truth.
-- Validate required fields.
-- Detect missing translations for French, English and German.
-- Report review status for translated public content.
-- Add focused tests for validation rules.
+### V1.1 — CV request workflow UI
 
-## Phase 3: Website Content
+Goal: prepare the public user journey for requesting CV PDFs.
 
-- Generate web-ready structured data from `data/cv.yml`.
-- Render multilingual portfolio pages.
-- Add language routing.
-- Add project, experience and skills sections.
+Scope:
 
-## Phase 4: Professional Artifacts
+- improve CV request section;
+- keep form front-only until backend exists;
+- no private data exposure;
+- no direct PDF downloads.
 
-- Generate LinkedIn-ready content.
-- Add dedicated print pages for CV layouts.
-- Add Playwright-based PDF generation.
-- Keep website and PDF layouts separate.
+### V1.2 — Serverless CV request backend
 
-## Phase 5: Automation
+Goal: receive CV requests safely.
 
-- Add GitHub Actions checks.
-- Add GitHub Pages deployment.
-- Add release or artifact publishing only after generated-output policy is settled.
+Expected flow:
+
+```txt
+Visitor submits request
+→ backend validates payload
+→ request is stored or logged safely
+→ approval email is sent to Constantin
+```
+
+Possible fields:
+
+- full name;
+- professional email;
+- company / organization;
+- LinkedIn or website;
+- requested CV type;
+- requested language;
+- reason/context.
+
+### V1.3 — Approval workflow
+
+Goal: approve or reject CV requests by email.
+
+Expected flow:
+
+```txt
+Constantin receives request email
+→ clicks approve or reject
+→ token is verified
+→ requester is notified
+```
+
+Approval links must use signed, expiring tokens.
+
+### V1.4 — Private CV delivery
+
+Goal: send approved CVs.
+
+Possible delivery modes:
+
+- email attachment;
+- temporary signed download link.
+
+Preferred: temporary signed link.
+
+### V1.5 — PDF visual polish
+
+Goal: make generated PDFs professionally designed.
+
+Tasks:
+
+- improve one-page layout;
+- improve full developer CV layout;
+- avoid ugly page breaks;
+- tune typography;
+- generate FR / EN / DE versions.
+
+### V1.6 — LinkedIn content generation
+
+Goal: generate LinkedIn-ready snippets from the source of truth.
+
+Potential outputs:
+
+- headline;
+- about section;
+- experience descriptions;
+- multilingual variants.
+
+## Future ideas
+
+- Admin-only request dashboard.
+- Rate limiting for CV requests.
+- Spam protection.
+- Audit trail for approved/rejected requests.
+- Optional analytics without personal tracking.
