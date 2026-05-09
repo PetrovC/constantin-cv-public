@@ -2,12 +2,26 @@ name = "cv-request-worker"
 main = "src/index.ts"
 compatibility_date = "2026-05-09"
 
+# Public-safe placeholder config only.
+# Do not commit account_id values, D1 database ids, secrets, or private data.
+
 [vars]
+# Keep committed values empty. Set deployment-specific values locally or in the
+# Cloudflare Worker environment before deploying.
 ALLOWED_ORIGINS = ""
-# Configure TURNSTILE_SECRET_KEY with `wrangler secret put TURNSTILE_SECRET_KEY`.
+PUBLIC_SITE_URL = ""
+
+# Configure secrets with `wrangler secret put`:
+# RESEND_API_KEY
+# OWNER_NOTIFICATION_EMAIL
+# OWNER_NOTIFICATION_FROM_EMAIL
+# APPROVAL_TOKEN_SECRET
+# TURNSTILE_SECRET_KEY
 
 [[d1_databases]]
 binding = "CV_REQUESTS_DB"
 database_name = "cv-request-worker"
+# Replace this all-zero placeholder with the real D1 database id only in local
+# deployment config. Do not commit a real database_id.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
