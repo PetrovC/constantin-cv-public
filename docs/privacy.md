@@ -2,13 +2,37 @@
 
 This repository is designed to be safe for public GitHub hosting.
 
-## Public Repository Rules
+## Public repository rules
 
-Tracked source files must not contain private contact data, private reference documents, generated print data, or generated PDFs. The public CV source in `data/cv.yml` may contain only public-safe information, including the broad location `Belgique / Luxembourg`.
+Tracked source files must not contain:
 
-Do not commit raw personal contact details, precise home or location details, private CV PDFs, reference CV files, generated print JSON, or generated PDFs.
+- raw personal email;
+- phone number;
+- precise home/location details;
+- private CV PDFs;
+- reference CV files;
+- generated print JSON;
+- generated PDFs;
+- secrets or API keys.
 
-## Private Overlay
+The public CV source in `data/cv.yml` may contain only public-safe information, including the broad location:
+
+```txt
+Belgique / Luxembourg
+```
+
+## Public-safe data
+
+`data/cv.yml` is safe to commit.
+
+It must not contain:
+
+- private email;
+- phone number;
+- precise home location;
+- private PDF-only contact data.
+
+## Private overlay
 
 Private contact data belongs in:
 
@@ -16,30 +40,93 @@ Private contact data belongs in:
 data/private/cv.private.yml
 ```
 
-That file is ignored by Git. Create it locally by copying:
+That file is ignored by Git.
+
+Create it locally from:
 
 ```txt
 data/private/cv.private.example.yml
 ```
 
-Then replace the placeholder values with private contact details for local print and PDF generation only.
+Then replace placeholder values with private contact details.
 
-## Private Print Data
+## Public web JSON
 
-Print JSON can include contact details that are not safe for the public website. For that reason, print JSON is generated only for local PDF generation and must stay under the ignored `generated/` directory.
+Generated public web JSON lives under:
 
-The public website build must use only public web JSON. It must not output private print routes.
+```txt
+generated/web/
+```
+
+It must never expose:
+
+- phone number;
+- raw email;
+- encoded mailto containing the real email;
+- precise private location;
+- private print routes.
+
+## Private print data
+
+Private print JSON lives under:
+
+```txt
+generated/print/
+```
+
+It may contain private contact data only for local/private PDF generation.
+
+It must stay ignored by Git.
 
 ## Generated PDFs
 
-Generated PDFs are private artifacts because they may include private contact details. They are reproducible from the public CV source plus the private overlay, so they should not be committed.
+Generated PDFs live under:
 
-## CI Privacy Gate
+```txt
+generated/pdf/
+```
 
-Public CI runs `npm run privacy:check` after public CV data generation and the Astro build. The check verifies that private generated paths and private reference files are not tracked, then scans tracked source files, public web JSON, and `apps/cv-web/dist` for private contact markers and private print-route output.
+They are private artifacts because they may include private contact details.
 
-The GitHub Pages workflow deploys only `apps/cv-web/dist`. It does not run local PDF generation and it does not upload private generated artifacts.
+They must not be committed.
 
-## Future CV Request Workflow
+They should not be publicly deployed unless intentionally reviewed and approved.
 
-A future public workflow can let visitors request a CV instead of downloading private files directly from the public site. That flow should keep private contact data and generated PDFs outside tracked source files and expose only reviewed, intentional artifacts.
+## Public build
+
+The normal public build must not output private print routes such as:
+
+```txt
+/fr/print/one-page/
+/fr/print/full-dev/
+```
+
+Print routes are only for local/private PDF generation mode.
+
+## Privacy check
+
+Run:
+
+```powershell
+npm run privacy:check
+```
+
+The check should fail if public/tracked files contain blocked private patterns.
+
+## Future CV request workflow
+
+Future public CV access should use a request workflow instead of direct public PDF downloads.
+
+Expected flow:
+
+```txt
+Visitor requests CV
+→ request is sent to a backend/serverless function
+→ Constantin receives an approval email
+→ Constantin approves or rejects
+→ approved requester receives a temporary link or email attachment
+```
+
+The public repository must still not contain private contact data, PDFs, secrets or serverless credentials.
+
+Serverless secrets must be stored in provider environment variables or GitHub secrets, never in source files.
