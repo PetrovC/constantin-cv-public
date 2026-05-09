@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import worker from '../src/index';
+import { createWorker } from '../src/index';
+import type { EmailEnv, EmailSender, OwnerNotificationEmail } from '../src/email';
 import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
 
@@ -25,8 +26,8 @@ describe('cv request worker', () => {
     await expectJson(response, 200, { status: 'ok' });
   });
 
-  it('persists a valid request and returns 202', async () => {
-    const { db, postCvRequest } = createWorkerHarness();
+  it('persists a valid request, sends the owner notification, and returns 202', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness();
     const response = await postCvRequest(validPayload);
     const body = (await response.json()) as {
       requestId: string;
@@ -58,10 +59,48 @@ describe('cv request worker', () => {
     });
     expect(db.inserts[0].createdAt).toBe(db.inserts[0].updatedAt);
     expect(Date.parse(db.inserts[0].createdAt)).not.toBeNaN();
+
+    expect(emailSender.notifications).toEqual([
+      {
+        env: expect.objectContaining({
+          RESEND_API_KEY: 'test-resend-api-key',
+          OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
+          OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+          PUBLIC_SITE_URL: 'https://www.example.com'
+        }),
+        notification: {
+          requestId: body.requestId,
+          payload: validPayload
+        }
+      }
+    ]);
+  });
+
+  it('keeps the request persisted and returns 202 when owner notification fails', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness({ failEmail: true });
+    const response = await postCvRequest(validPayload);
+    const body = (await response.json()) as {
+      requestId: string;
+      status: string;
+      message: string;
+    };
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      status: 'pending',
+      message: 'Your CV request was received and is pending review.'
+    });
+    expect(db.inserts).toHaveLength(1);
+    expect(db.inserts[0].id).toBe(body.requestId);
+    expect(emailSender.notifications).toHaveLength(1);
+    expect(emailSender.notifications[0].notification).toEqual({
+      requestId: body.requestId,
+      payload: validPayload
+    });
   });
 
   it('returns 503 when persistence fails', async () => {
-    const { db, postCvRequest } = createWorkerHarness({ failWrites: true });
+    const { db, emailSender, postCvRequest } = createWorkerHarness({ failWrites: true });
     const response = await postCvRequest(validPayload);
 
     await expectJson(response, 503, {
@@ -69,6 +108,7 @@ describe('cv request worker', () => {
       message: 'The CV request service is temporarily unavailable. Try again later.'
     });
     expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
   });
 
   it('accepts a valid email address', async () => {
@@ -114,11 +154,12 @@ describe('cv request worker', () => {
   });
 
   it('does not persist validation failures', async () => {
-    const { db, postCvRequest } = createWorkerHarness();
+    const { db, emailSender, postCvRequest } = createWorkerHarness();
     const response = await postCvRequest({});
 
     expect(response.status).toBe(400);
     expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
   });
 
   it('returns 400 for an invalid email address', async () => {
@@ -241,6 +282,29 @@ interface InsertedCvRequest {
 
 interface HarnessOptions {
   failWrites?: boolean;
+  failEmail?: boolean;
+}
+
+interface SentOwnerNotification {
+  env: EmailEnv;
+  notification: OwnerNotificationEmail;
+}
+
+class FakeEmailSender implements EmailSender {
+  readonly notifications: SentOwnerNotification[] = [];
+
+  constructor(private readonly options: HarnessOptions = {}) {}
+
+  async sendOwnerNotification(
+    env: EmailEnv,
+    notification: OwnerNotificationEmail
+  ): Promise<void> {
+    this.notifications.push({ env, notification });
+
+    if (this.options.failEmail) {
+      throw new Error('Email send failed');
+    }
+  }
 }
 
 class FakeD1Database {
@@ -297,16 +361,23 @@ class FakeD1Database {
 
 function createWorkerHarness(options: HarnessOptions = {}): {
   db: FakeD1Database;
+  emailSender: FakeEmailSender;
   fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
   postCvRequest: (payload: unknown) => Promise<Response>;
 } {
   const db = new FakeD1Database(options);
+  const emailSender = new FakeEmailSender(options);
+  const testWorker = createWorker({ emailSender });
   const env: Env = {
-    CV_REQUESTS_DB: db as unknown as D1Database
+    CV_REQUESTS_DB: db as unknown as D1Database,
+    RESEND_API_KEY: 'test-resend-api-key',
+    OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
+    OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+    PUBLIC_SITE_URL: 'https://www.example.com'
   };
 
   const fetchWorker = (path: string, init?: RequestInit): Promise<Response> =>
-    worker.fetch(new Request(`${workerOrigin}${path}`, init), env, executionContext);
+    testWorker.fetch(new Request(`${workerOrigin}${path}`, init), env, executionContext);
 
   const postCvRequest = (payload: unknown): Promise<Response> =>
     fetchWorker('/api/cv-requests', {
@@ -317,7 +388,7 @@ function createWorkerHarness(options: HarnessOptions = {}): {
       body: JSON.stringify(payload)
     });
 
-  return { db, fetchWorker, postCvRequest };
+  return { db, emailSender, fetchWorker, postCvRequest };
 }
 
 async function expectJson(

@@ -1,7 +1,12 @@
+import { ResendEmailSender, type EmailSender } from './email';
 import { validateCvRequestPayload } from './validation';
 
 export interface Env {
   CV_REQUESTS_DB: D1Database;
+  RESEND_API_KEY: string;
+  OWNER_NOTIFICATION_EMAIL: string;
+  OWNER_NOTIFICATION_FROM_EMAIL: string;
+  PUBLIC_SITE_URL?: string;
 }
 
 type JsonBody =
@@ -17,29 +22,47 @@ const jsonHeaders = {
   'cache-control': 'no-store'
 } as const;
 
-const worker = {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
+interface WorkerDependencies {
+  emailSender?: EmailSender;
+}
 
-    if (request.method === 'GET' && url.pathname === '/health') {
-      return jsonResponse({ status: 'ok' }, 200);
+interface CvRequestWorker {
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response>;
+}
+
+export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWorker {
+  const emailSender = dependencies.emailSender ?? new ResendEmailSender();
+
+  return {
+    async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+      const url = new URL(request.url);
+
+      if (request.method === 'GET' && url.pathname === '/health') {
+        return jsonResponse({ status: 'ok' }, 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/cv-requests') {
+        return handleCvRequest(request, env, emailSender);
+      }
+
+      if (url.pathname === '/health' || url.pathname === '/api/cv-requests') {
+        return jsonResponse({ status: 'method_not_allowed', message: 'Method not allowed.' }, 405);
+      }
+
+      return jsonResponse({ status: 'not_found', message: 'Not found.' }, 404);
     }
+  };
+}
 
-    if (request.method === 'POST' && url.pathname === '/api/cv-requests') {
-      return handleCvRequest(request, env);
-    }
-
-    if (url.pathname === '/health' || url.pathname === '/api/cv-requests') {
-      return jsonResponse({ status: 'method_not_allowed', message: 'Method not allowed.' }, 405);
-    }
-
-    return jsonResponse({ status: 'not_found', message: 'Not found.' }, 404);
-  }
-};
+const worker = createWorker();
 
 export default worker;
 
-async function handleCvRequest(request: Request, env: Env): Promise<Response> {
+async function handleCvRequest(
+  request: Request,
+  env: Env,
+  emailSender: EmailSender
+): Promise<Response> {
   const parsedBody = await readJsonBody(request);
 
   if (!parsedBody.ok) {
@@ -107,6 +130,19 @@ async function handleCvRequest(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  try {
+    await emailSender.sendOwnerNotification(env, {
+      requestId,
+      payload: validation.payload
+    });
+  } catch {
+    return acceptedCvRequestResponse(requestId);
+  }
+
+  return acceptedCvRequestResponse(requestId);
+}
+
+function acceptedCvRequestResponse(requestId: string): Response {
   return jsonResponse(
     {
       requestId,
