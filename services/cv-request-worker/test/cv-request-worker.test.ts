@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { createApprovalToken, type ApprovalAction } from '../src/approvalTokens';
 import { createWorker } from '../src/index';
-import type {
-  EmailEnv,
-  EmailSender,
-  OwnerNotificationEmail,
-  RequesterDecisionEmail
+import {
+  ResendEmailSender,
+  type EmailEnv,
+  type EmailSender,
+  type EmailSendResult,
+  type OwnerNotificationEmail,
+  type RequesterDecisionEmail
 } from '../src/email';
 import type { Env } from '../src/index';
 import type { CvRequestPayload } from '../src/types';
@@ -23,6 +25,7 @@ const approvalTokenSecret = 'test-approval-token-secret';
 const turnstileSecret = 'test-turnstile-secret';
 const validTurnstileToken = 'test-turnstile-token';
 const turnstileErrorCodes = ['invalid-input-response', 'timeout-or-duplicate'];
+const d1DatabaseId = 'test-d1-database-id';
 const executionContext = {} as ExecutionContext;
 
 const validPayload: CvRequestPayload = {
@@ -67,17 +70,83 @@ describe('cv request worker', () => {
         TURNSTILE_SECRET_KEY: 'site-secret'
       }
     );
-    const form = siteverifyInit?.body as URLSearchParams;
+    const siteverifyBody = parseSiteverifyRequestBody(siteverifyInit?.body);
 
     expect(result).toEqual({ ok: true });
     expect(siteverifyUrl).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
     expect(siteverifyInit?.method).toBe('POST');
     expect(new Headers(siteverifyInit?.headers).get('content-type')).toBe(
-      'application/x-www-form-urlencoded'
+      'application/json'
     );
-    expect(form.get('secret')).toBe('site-secret');
-    expect(form.get('response')).toBe('site-token');
-    expect(form.get('remoteip')).toBe('203.0.113.10');
+    expect(siteverifyBody).toEqual({
+      secret: 'site-secret',
+      response: 'site-token',
+      remoteip: '203.0.113.10'
+    });
+  });
+
+  it('binds the default Siteverify fetch to globalThis', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchThis: unknown;
+
+    globalThis.fetch = async function (this: unknown) {
+      fetchThis = this;
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    } as typeof fetch;
+
+    try {
+      const verifier = new CloudflareTurnstileVerifier();
+      const result = await verifier.verify(
+        {
+          token: 'site-token'
+        },
+        {
+          TURNSTILE_SECRET_KEY: 'site-secret'
+        }
+      );
+
+      expect(result).toEqual({ ok: true });
+      expect(fetchThis).toBe(globalThis);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('omits the Siteverify remoteip field when no remote IP is present', async () => {
+    let siteverifyInit: RequestInit | undefined;
+    const fetcher: typeof fetch = async (_input, init) => {
+      siteverifyInit = init;
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    };
+    const verifier = new CloudflareTurnstileVerifier(fetcher);
+    const result = await verifier.verify(
+      {
+        token: 'site-token'
+      },
+      {
+        TURNSTILE_SECRET_KEY: 'site-secret'
+      }
+    );
+    const siteverifyBody = parseSiteverifyRequestBody(siteverifyInit?.body);
+
+    expect(result).toEqual({ ok: true });
+    expect(siteverifyBody).toEqual({
+      secret: 'site-secret',
+      response: 'site-token'
+    });
+    expect(siteverifyBody).not.toHaveProperty('remoteip');
   });
 
   it('reads Cloudflare Siteverify error codes from failed Turnstile verification', async () => {
@@ -98,7 +167,12 @@ describe('cv request worker', () => {
       }
     );
 
-    expect(result).toEqual({ ok: false, errorCodes: turnstileErrorCodes });
+    expect(result).toEqual({
+      ok: false,
+      failureKind: 'siteverify_failed',
+      errorCodes: turnstileErrorCodes,
+      httpStatus: 200
+    });
   });
 
   it('handles OPTIONS preflight for an allowed origin', async () => {
@@ -253,7 +327,7 @@ describe('cv request worker', () => {
     expect(turnstileVerifier.verifications).toHaveLength(1);
   });
 
-  it('omits Turnstile error codes when TURNSTILE_DEBUG is disabled', async () => {
+  it('omits Turnstile debug diagnostics when TURNSTILE_DEBUG is disabled', async () => {
     const { postCvRequest } = createWorkerHarness({
       failTurnstile: true,
       turnstileErrorCodes
@@ -266,10 +340,13 @@ describe('cv request worker', () => {
       status: 'turnstile_verification_failed',
       message: 'The anti-spam check failed. Try again.'
     });
+    expect(body).not.toHaveProperty('siteverifyHttpStatus');
+    expect(body).not.toHaveProperty('turnstileErrorCodes');
+    expect(body).not.toHaveProperty('turnstileFailureKind');
     expect(body).not.toHaveProperty('errorCodes');
   });
 
-  it('includes Turnstile error codes when TURNSTILE_DEBUG is true', async () => {
+  it('includes Turnstile error codes and failure kind when TURNSTILE_DEBUG is true', async () => {
     const { postCvRequest } = createWorkerHarness({
       failTurnstile: true,
       turnstileDebug: true,
@@ -280,8 +357,248 @@ describe('cv request worker', () => {
     await expectJson(response, 403, {
       status: 'turnstile_verification_failed',
       message: 'The anti-spam check failed. Try again.',
-      errorCodes: turnstileErrorCodes
+      siteverifyHttpStatus: 200,
+      turnstileErrorCodes,
+      turnstileFailureKind: 'siteverify_failed'
     });
+  });
+
+  it('returns Siteverify failure codes from the real verifier path in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-failed-submitted-token';
+    const { db, emailSender, postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': turnstileErrorCodes }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      siteverifyHttpStatus: 200,
+      turnstileErrorCodes,
+      turnstileFailureKind: 'siteverify_failed'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('returns Siteverify error codes from a non-OK Siteverify JSON response in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-non-ok-failed-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': turnstileErrorCodes }), {
+        status: 400,
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      siteverifyHttpStatus: 400,
+      turnstileErrorCodes,
+      turnstileFailureKind: 'siteverify_failed'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('returns the Siteverify fetch exception failure kind from the real verifier path in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-fetch-exception-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async (_input, init) => {
+      const siteverifyBody = parseSiteverifyRequestBody(init?.body);
+
+      throw new Error(
+        `Private fetch detail: token=${siteverifyBody.response}; secret=${siteverifyBody.secret}`
+      );
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      turnstileFailureKind: 'siteverify_fetch_exception'
+    });
+    expect(responseText).not.toContain('Private fetch detail');
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('returns the Siteverify HTTP error failure kind for a non-OK invalid JSON response in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-http-error-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response(`token=${submittedTurnstileToken}; secret=${turnstileSecret}`, {
+        status: 503,
+        headers: {
+          'content-type': 'text/plain'
+        }
+      })
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      siteverifyHttpStatus: 503,
+      turnstileFailureKind: 'siteverify_http_error'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('returns the Siteverify HTTP error failure kind for a non-OK unexpected JSON response in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-http-unexpected-response-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response(
+        JSON.stringify({
+          success: 'false',
+          token: submittedTurnstileToken,
+          secret: turnstileSecret
+        }),
+        {
+          status: 400,
+          headers: {
+            'content-type': 'application/json'
+          }
+        }
+      )
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      siteverifyHttpStatus: 400,
+      turnstileFailureKind: 'siteverify_http_error'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('returns the Siteverify invalid JSON failure kind from the real verifier path in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-invalid-json-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response('{', {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      turnstileFailureKind: 'siteverify_invalid_json'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('returns the Siteverify unexpected response failure kind from the real verifier path in debug mode', async () => {
+    const submittedTurnstileToken = 'siteverify-unexpected-response-submitted-token';
+    const { postCvRequest } = createSiteverifyWorkerHarness(async () =>
+      new Response(
+        JSON.stringify({
+          success: 'false',
+          token: submittedTurnstileToken,
+          secret: turnstileSecret
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json'
+          }
+        }
+      )
+    );
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      turnstileFailureKind: 'siteverify_unexpected_response'
+    });
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
+  });
+
+  it('includes an empty Turnstile error code list when TURNSTILE_DEBUG is true and no codes are available', async () => {
+    const { postCvRequest } = createWorkerHarness({
+      failTurnstile: true,
+      turnstileDebug: true
+    });
+    const response = await postCvRequest(validPayload);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      siteverifyHttpStatus: 200,
+      turnstileErrorCodes: [],
+      turnstileFailureKind: 'siteverify_failed'
+    });
+    expect(body).not.toHaveProperty('errorCodes');
+  });
+
+  it('keeps thrown verifier details private when TURNSTILE_DEBUG is true', async () => {
+    const submittedTurnstileToken = 'exception-submitted-turnstile-token';
+    const { postCvRequest } = createWorkerHarness({
+      throwTurnstile: true,
+      turnstileDebug: true
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      turnstileFailureKind: 'siteverify_fetch_exception'
+    });
+    expect(responseText).not.toContain('Raw Turnstile exception details');
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
   });
 
   it('never returns the submitted Turnstile token in a failed verification response', async () => {
@@ -298,9 +615,7 @@ describe('cv request worker', () => {
     const responseText = await response.text();
 
     expect(response.status).toBe(403);
-    expect(responseText).not.toContain(submittedTurnstileToken);
-    expect(responseText).not.toContain(turnstileSecret);
-    expect(responseText).not.toContain(validPayload.requesterEmail);
+    expectFailedTurnstileResponseNotToLeak(responseText, submittedTurnstileToken);
   });
 
   it('does not persist or send email when Turnstile verification fails', async () => {
@@ -427,6 +742,136 @@ describe('cv request worker', () => {
         approve: expect.any(String),
         reject: expect.any(String)
       }
+    });
+  });
+
+  it('returns ownerNotificationStatus sent when email debug is true and owner notification succeeds', async () => {
+    const { postCvRequest } = createWorkerHarness({ cvRequestEmailDebug: true });
+    const response = await postCvRequest(validPayload);
+    const body = (await response.json()) as {
+      ownerNotificationStatus?: string;
+    };
+    const { postCvRequest: postCvRequestWithoutDebug } = createWorkerHarness();
+    const responseWithoutDebug = await postCvRequestWithoutDebug(validPayload);
+    const bodyWithoutDebug = await responseWithoutDebug.json();
+
+    expect(response.status).toBe(202);
+    expect(body.ownerNotificationStatus).toBe('sent');
+    expect(responseWithoutDebug.status).toBe(202);
+    expect(bodyWithoutDebug).not.toHaveProperty('ownerNotificationStatus');
+  });
+
+  it('returns ownerNotificationStatus failed when email debug is true and owner notification fails', async () => {
+    const { postCvRequest } = createWorkerHarness({
+      cvRequestEmailDebug: true,
+      failEmail: true
+    });
+    const response = await postCvRequest(validPayload);
+    const body = (await response.json()) as {
+      ownerNotificationStatus?: string;
+    };
+
+    expect(response.status).toBe(202);
+    expect(body.ownerNotificationStatus).toBe('failed');
+  });
+
+  it('keeps the current POST response shape when email debug is disabled', async () => {
+    const { postCvRequest } = createWorkerHarness({ failEmail: true });
+    const response = await postCvRequest(validPayload);
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body).toEqual({
+      requestId: expect.any(String),
+      status: 'pending',
+      message: 'Your CV request was received and is pending review.'
+    });
+  });
+
+  it('keeps owner email debug responses free of emails, API keys, tokens, and private request data', async () => {
+    const submittedTurnstileToken = 'owner-email-debug-submitted-turnstile-token';
+    const { emailSender, postCvRequest } = createWorkerHarness({
+      cvRequestEmailDebug: true,
+      failEmail: true
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+    const body = JSON.parse(responseText) as { ownerNotificationStatus?: string };
+    const notification = emailSender.notifications[0].notification;
+    const approvalTokens = [
+      new URL(notification.actionLinks.approve).searchParams.get('token'),
+      new URL(notification.actionLinks.reject).searchParams.get('token')
+    ].filter((token): token is string => token !== null);
+
+    expect(response.status).toBe(202);
+    expect(body.ownerNotificationStatus).toBe('failed');
+    expectOwnerNotificationDebugResponseNotToLeak(
+      responseText,
+      submittedTurnstileToken,
+      approvalTokens
+    );
+  });
+
+  it.each([
+    ['invalid_api_key', { name: 'invalid_api_key' }],
+    ['validation_error', { code: 'validation_error' }]
+  ])(
+    'returns safe Resend 403 %s owner notification diagnostics only when email debug is true',
+    async (resendErrorName, resendErrorBody) => {
+      const rawResendErrorMessage =
+        `Raw Resend error message: key=test-resend-api-key; to=owner@example.com; ` +
+        `from=cv-requests@example.com; requester=${validPayload.requesterEmail}; name=${validPayload.fullName}.`;
+
+      await expectResendOwnerNotificationFailureDebug({
+        fetcher: createResendJsonResponseFetcher(403, {
+          ...resendErrorBody,
+          message: rawResendErrorMessage
+        }),
+        expectedDebugFields: {
+          ownerNotificationFailureKind: 'resend_http_error',
+          resendHttpStatus: 403,
+          resendErrorName
+        },
+        rawPrivateValues: [rawResendErrorMessage]
+      });
+    }
+  );
+
+  it('returns safe Resend 422 invalid_from_address owner notification diagnostics only when email debug is true', async () => {
+    const rawResendErrorMessage =
+      `Raw Resend invalid sender message: from=cv-requests@example.com; ` +
+      `requester=${validPayload.requesterEmail}; name=${validPayload.fullName}.`;
+
+    await expectResendOwnerNotificationFailureDebug({
+      fetcher: createResendJsonResponseFetcher(422, {
+        type: 'invalid_from_address',
+        message: rawResendErrorMessage
+      }),
+      expectedDebugFields: {
+        ownerNotificationFailureKind: 'resend_http_error',
+        resendHttpStatus: 422,
+        resendErrorName: 'invalid_from_address'
+      },
+      rawPrivateValues: [rawResendErrorMessage]
+    });
+  });
+
+  it('returns resend_fetch_exception when the Resend owner notification request throws', async () => {
+    const rawFetchExceptionMessage =
+      `Raw Resend fetch exception: key=test-resend-api-key; requester=${validPayload.requesterEmail}; ` +
+      `name=${validPayload.fullName}.`;
+
+    await expectResendOwnerNotificationFailureDebug({
+      fetcher: async () => {
+        throw new Error(rawFetchExceptionMessage);
+      },
+      expectedDebugFields: {
+        ownerNotificationFailureKind: 'resend_fetch_exception'
+      },
+      rawPrivateValues: [rawFetchExceptionMessage]
     });
   });
 
@@ -619,6 +1064,64 @@ describe('cv request worker', () => {
     expect(emailSender.notifications).toHaveLength(0);
   });
 
+  it('returns 503 without persistence debug when the D1 binding is missing', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness({ omitD1Binding: true });
+    const response = await postCvRequest(validPayload);
+
+    await expectJson(response, 503, {
+      status: 'service_unavailable',
+      message: 'The CV request service is temporarily unavailable. Try again later.'
+    });
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('returns missing_d1_binding only when CV_REQUEST_DEBUG is true', async () => {
+    const submittedTurnstileToken = 'missing-d1-binding-submitted-token';
+    const { db, emailSender, postCvRequest } = createWorkerHarness({
+      omitD1Binding: true,
+      cvRequestDebug: true
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'service_unavailable',
+      message: 'The CV request service is temporarily unavailable. Try again later.',
+      persistenceFailureKind: 'missing_d1_binding'
+    });
+    expectFailedPersistenceResponseNotToLeak(responseText, submittedTurnstileToken);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
+  it('returns d1_insert_failed only when CV_REQUEST_DEBUG is true', async () => {
+    const submittedTurnstileToken = 'd1-insert-failed-submitted-token';
+    const { db, emailSender, postCvRequest } = createWorkerHarness({
+      failWrites: true,
+      cvRequestDebug: true
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'service_unavailable',
+      message: 'The CV request service is temporarily unavailable. Try again later.',
+      persistenceFailureKind: 'd1_insert_failed'
+    });
+    expectFailedPersistenceResponseNotToLeak(responseText, submittedTurnstileToken);
+    expect(db.inserts).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(0);
+  });
+
   it('accepts a valid email address', async () => {
     const { postCvRequest } = createWorkerHarness();
     const response = await postCvRequest({
@@ -793,7 +1296,11 @@ interface HarnessOptions {
   failEmail?: boolean;
   failRequesterEmail?: boolean;
   failTurnstile?: boolean;
+  throwTurnstile?: boolean;
+  omitD1Binding?: boolean;
   omitTurnstileSecret?: boolean;
+  cvRequestDebug?: boolean;
+  cvRequestEmailDebug?: boolean;
   turnstileDebug?: boolean;
   turnstileErrorCodes?: string[];
 }
@@ -817,23 +1324,27 @@ class FakeEmailSender implements EmailSender {
   async sendOwnerNotification(
     env: EmailEnv,
     notification: OwnerNotificationEmail
-  ): Promise<void> {
+  ): Promise<EmailSendResult> {
     this.notifications.push({ env, notification });
 
     if (this.options.failEmail) {
-      throw new Error('Email send failed');
+      return { ok: false, failureKind: 'resend_fetch_exception' };
     }
+
+    return { ok: true };
   }
 
   async sendRequesterDecisionNotification(
     env: EmailEnv,
     notification: RequesterDecisionEmail
-  ): Promise<void> {
+  ): Promise<EmailSendResult> {
     this.requesterNotifications.push({ env, notification });
 
     if (this.options.failRequesterEmail) {
-      throw new Error('Requester email send failed');
+      return { ok: false, failureKind: 'resend_fetch_exception' };
     }
+
+    return { ok: true };
   }
 }
 
@@ -850,13 +1361,25 @@ class FakeTurnstileVerifier implements TurnstileVerifier<Env> {
   async verify(input: TurnstileVerificationInput, env: Env) {
     this.verifications.push({ input, env });
 
+    if (this.options.throwTurnstile) {
+      throw new Error(
+        `Raw Turnstile exception details: token=${input.token}; secret=${turnstileSecret}`
+      );
+    }
+
     return this.options.failTurnstile
-      ? { ok: false as const, errorCodes: this.options.turnstileErrorCodes }
+      ? {
+          ok: false as const,
+          failureKind: 'siteverify_failed' as const,
+          errorCodes: this.options.turnstileErrorCodes ?? [],
+          httpStatus: 200
+        }
       : { ok: true as const };
   }
 }
 
 class FakeD1Database {
+  readonly databaseId = d1DatabaseId;
   readonly inserts: InsertedCvRequest[] = [];
 
   constructor(private readonly options: HarnessOptions = {}) {}
@@ -878,7 +1401,9 @@ class FakeD1Database {
 
   private async run(query: string, values: unknown[]) {
     if (this.options.failWrites) {
-      throw new Error('D1 write failed');
+      throw new Error(
+        `D1 write failed for requester=${String(values[2])}; database=${d1DatabaseId}`
+      );
     }
 
     if (query.startsWith('insert into cv_requests')) {
@@ -967,8 +1492,8 @@ function createWorkerHarness(options: HarnessOptions = {}): {
   const emailSender = new FakeEmailSender(options);
   const turnstileVerifier = new FakeTurnstileVerifier(options);
   const testWorker = createWorker({ emailSender, turnstileVerifier });
-  const env: Env = {
-    CV_REQUESTS_DB: db as unknown as D1Database,
+  const env = {
+    ...(options.omitD1Binding ? {} : { CV_REQUESTS_DB: db as unknown as D1Database }),
     ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
     RESEND_API_KEY: 'test-resend-api-key',
     OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
@@ -976,8 +1501,10 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     APPROVAL_TOKEN_SECRET: approvalTokenSecret,
     PUBLIC_SITE_URL: 'https://www.example.com',
     TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret,
-    TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined
-  };
+    TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined,
+    CV_REQUEST_DEBUG: options.cvRequestDebug ? 'true' : undefined,
+    CV_REQUEST_EMAIL_DEBUG: options.cvRequestEmailDebug ? 'true' : undefined
+  } as Env;
 
   const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
     const url = path.startsWith('http') ? path : `${workerOrigin}${path}`;
@@ -997,6 +1524,102 @@ function createWorkerHarness(options: HarnessOptions = {}): {
   };
 
   return { db, emailSender, turnstileVerifier, fetchWorker, postCvRequest };
+}
+
+function createSiteverifyWorkerHarness(
+  fetcher: typeof fetch,
+  options: HarnessOptions = {}
+): {
+  db: FakeD1Database;
+  emailSender: FakeEmailSender;
+  fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
+  postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
+} {
+  const db = new FakeD1Database(options);
+  const emailSender = new FakeEmailSender(options);
+  const testWorker = createWorker({
+    emailSender,
+    turnstileVerifier: new CloudflareTurnstileVerifier(fetcher)
+  });
+  const env: Env = {
+    CV_REQUESTS_DB: db as unknown as D1Database,
+    ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
+    RESEND_API_KEY: 'test-resend-api-key',
+    OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
+    OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+    APPROVAL_TOKEN_SECRET: approvalTokenSecret,
+    PUBLIC_SITE_URL: 'https://www.example.com',
+    TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret,
+    TURNSTILE_DEBUG: (options.turnstileDebug ?? true) ? 'true' : undefined
+  };
+
+  const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
+    const url = path.startsWith('http') ? path : `${workerOrigin}${path}`;
+    return testWorker.fetch(new Request(url, init), env, executionContext);
+  };
+
+  const postCvRequest = (payload: unknown, init: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set('content-type', headers.get('content-type') ?? 'application/json');
+
+    return fetchWorker('/api/cv-requests', {
+      ...init,
+      method: 'POST',
+      headers,
+      body: init.body ?? JSON.stringify(withTurnstileToken(payload))
+    });
+  };
+
+  return { db, emailSender, fetchWorker, postCvRequest };
+}
+
+function createResendWorkerHarness(
+  fetcher: typeof fetch,
+  options: HarnessOptions = {}
+): {
+  db: FakeD1Database;
+  turnstileVerifier: FakeTurnstileVerifier;
+  fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
+  postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
+} {
+  const db = new FakeD1Database(options);
+  const turnstileVerifier = new FakeTurnstileVerifier(options);
+  const testWorker = createWorker({
+    emailSender: new ResendEmailSender(fetcher),
+    turnstileVerifier
+  });
+  const env = {
+    ...(options.omitD1Binding ? {} : { CV_REQUESTS_DB: db as unknown as D1Database }),
+    ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
+    RESEND_API_KEY: 'test-resend-api-key',
+    OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
+    OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
+    APPROVAL_TOKEN_SECRET: approvalTokenSecret,
+    PUBLIC_SITE_URL: 'https://www.example.com',
+    TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret,
+    TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined,
+    CV_REQUEST_DEBUG: options.cvRequestDebug ? 'true' : undefined,
+    CV_REQUEST_EMAIL_DEBUG: options.cvRequestEmailDebug ? 'true' : undefined
+  } as Env;
+
+  const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
+    const url = path.startsWith('http') ? path : `${workerOrigin}${path}`;
+    return testWorker.fetch(new Request(url, init), env, executionContext);
+  };
+
+  const postCvRequest = (payload: unknown, init: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set('content-type', headers.get('content-type') ?? 'application/json');
+
+    return fetchWorker('/api/cv-requests', {
+      ...init,
+      method: 'POST',
+      headers,
+      body: init.body ?? JSON.stringify(withTurnstileToken(payload))
+    });
+  };
+
+  return { db, turnstileVerifier, fetchWorker, postCvRequest };
 }
 
 function withTurnstileToken(payload: unknown): unknown {
@@ -1085,6 +1708,219 @@ async function expectJson(
 ): Promise<void> {
   expect(response.status).toBe(status);
   await expect(response.json()).resolves.toEqual(expectedBody);
+}
+
+interface ExpectedOwnerNotificationFailureDebugFields {
+  ownerNotificationFailureKind: string;
+  resendHttpStatus?: number;
+  resendErrorName?: string;
+}
+
+async function expectResendOwnerNotificationFailureDebug({
+  fetcher,
+  expectedDebugFields,
+  rawPrivateValues = []
+}: {
+  fetcher: typeof fetch;
+  expectedDebugFields: ExpectedOwnerNotificationFailureDebugFields;
+  rawPrivateValues?: string[];
+}): Promise<void> {
+  const submittedTurnstileToken = 'resend-owner-debug-submitted-turnstile-token';
+  const resendRequestBodies: BodyInit[] = [];
+  const capturingFetcher: typeof fetch = async (input, init) => {
+    if (init?.body !== undefined && init.body !== null) {
+      resendRequestBodies.push(init.body);
+    }
+
+    return fetcher(input, init);
+  };
+
+  const { postCvRequest } = createResendWorkerHarness(capturingFetcher, {
+    cvRequestEmailDebug: true
+  });
+  const response = await postCvRequest({
+    ...validPayload,
+    turnstileToken: submittedTurnstileToken
+  });
+  const responseText = await response.text();
+  const approvalTokens = readApprovalTokensFromOwnerEmailText(
+    parseResendEmailRequestBody(resendRequestBodies[0]).text
+  );
+
+  expect(response.status).toBe(202);
+  expect(JSON.parse(responseText)).toEqual({
+    requestId: expect.any(String),
+    status: 'pending',
+    message: 'Your CV request was received and is pending review.',
+    ownerNotificationStatus: 'failed',
+    ...expectedDebugFields
+  });
+  expectOwnerNotificationDebugResponseNotToLeak(
+    responseText,
+    submittedTurnstileToken,
+    approvalTokens,
+    rawPrivateValues
+  );
+
+  const { postCvRequest: postCvRequestWithoutDebug } = createResendWorkerHarness(fetcher);
+  const responseWithoutDebug = await postCvRequestWithoutDebug({
+    ...validPayload,
+    turnstileToken: submittedTurnstileToken
+  });
+  const bodyWithoutDebug = await responseWithoutDebug.json();
+
+  expect(responseWithoutDebug.status).toBe(202);
+  expect(bodyWithoutDebug).toEqual({
+    requestId: expect.any(String),
+    status: 'pending',
+    message: 'Your CV request was received and is pending review.'
+  });
+}
+
+function createResendJsonResponseFetcher(
+  httpStatus: number,
+  body: Record<string, unknown>
+): typeof fetch {
+  return async () =>
+    new Response(JSON.stringify(body), {
+      status: httpStatus,
+      headers: {
+        'content-type': 'application/json'
+      }
+    });
+}
+
+function parseResendEmailRequestBody(body: BodyInit | null | undefined): {
+  text: string;
+} {
+  expect(typeof body).toBe('string');
+
+  const parsedBody = JSON.parse(body as string) as unknown;
+
+  if (
+    !isTestRecord(parsedBody) ||
+    typeof parsedBody.text !== 'string' ||
+    typeof parsedBody.from !== 'string' ||
+    typeof parsedBody.to !== 'string'
+  ) {
+    throw new Error('Expected a JSON Resend email request body.');
+  }
+
+  return {
+    text: parsedBody.text
+  };
+}
+
+function readApprovalTokensFromOwnerEmailText(text: string): string[] {
+  return text
+    .split('\n')
+    .filter((line) => line.startsWith('Approve: ') || line.startsWith('Reject: '))
+    .map((line) => new URL(line.slice(line.indexOf(':') + 1).trim()).searchParams.get('token'))
+    .filter((token): token is string => token !== null);
+}
+
+function parseSiteverifyRequestBody(body: BodyInit | null | undefined): {
+  secret: string;
+  response: string;
+  remoteip?: string;
+} {
+  expect(typeof body).toBe('string');
+
+  const parsedBody = JSON.parse(body as string) as unknown;
+
+  if (!isSiteverifyRequestBody(parsedBody)) {
+    throw new Error('Expected a JSON Siteverify request body.');
+  }
+
+  return parsedBody;
+}
+
+function isSiteverifyRequestBody(value: unknown): value is {
+  secret: string;
+  response: string;
+  remoteip?: string;
+} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { secret?: unknown }).secret === 'string' &&
+    typeof (value as { response?: unknown }).response === 'string' &&
+    ((value as { remoteip?: unknown }).remoteip === undefined ||
+      typeof (value as { remoteip?: unknown }).remoteip === 'string')
+  );
+}
+
+function isTestRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function expectFailedTurnstileResponseNotToLeak(
+  responseText: string,
+  submittedTurnstileToken: string
+): void {
+  expectSensitiveCvRequestDataNotToLeak(responseText, submittedTurnstileToken);
+}
+
+function expectFailedPersistenceResponseNotToLeak(
+  responseText: string,
+  submittedTurnstileToken: string
+): void {
+  expectSensitiveCvRequestDataNotToLeak(responseText, submittedTurnstileToken);
+  expect(responseText).not.toContain('D1 write failed');
+  expect(responseText).not.toContain('CV_REQUESTS_DB');
+}
+
+function expectOwnerNotificationDebugResponseNotToLeak(
+  responseText: string,
+  submittedTurnstileToken: string,
+  approvalTokens: string[],
+  rawPrivateValues: string[] = []
+): void {
+  expectSensitiveCvRequestDataNotToLeak(responseText, submittedTurnstileToken);
+  expect(responseText).not.toContain('fullName');
+  expect(responseText).not.toContain('company');
+  expect(responseText).not.toContain('profileUrl');
+  expect(responseText).not.toContain(validPayload.requestedCvType);
+  expect(responseText).not.toContain('requestedCvType');
+  expect(responseText).not.toContain('requestedLanguage');
+  expect(responseText).not.toContain('reason');
+  expect(responseText).not.toContain('owner@example.com');
+  expect(responseText).not.toContain('OWNER_NOTIFICATION_EMAIL');
+  expect(responseText).not.toContain('cv-requests@example.com');
+  expect(responseText).not.toContain('OWNER_NOTIFICATION_FROM_EMAIL');
+  expect(responseText).not.toContain(approvalTokenSecret);
+  expect(responseText).not.toContain('APPROVAL_TOKEN_SECRET');
+  expect(responseText).not.toContain('Email send failed');
+  expect(responseText).not.toContain('Raw Resend');
+
+  for (const rawPrivateValue of rawPrivateValues) {
+    expect(responseText).not.toContain(rawPrivateValue);
+  }
+
+  for (const token of approvalTokens) {
+    expect(token).not.toHaveLength(0);
+    expect(responseText).not.toContain(token);
+  }
+}
+
+function expectSensitiveCvRequestDataNotToLeak(
+  responseText: string,
+  submittedTurnstileToken: string
+): void {
+  expect(responseText).not.toContain(submittedTurnstileToken);
+  expect(responseText).not.toContain('turnstileToken');
+  expect(responseText).not.toContain(turnstileSecret);
+  expect(responseText).not.toContain('TURNSTILE_SECRET_KEY');
+  expect(responseText).not.toContain(validPayload.requesterEmail);
+  expect(responseText).not.toContain('requesterEmail');
+  expect(responseText).not.toContain('test-resend-api-key');
+  expect(responseText).not.toContain('RESEND_API_KEY');
+  expect(responseText).not.toContain(validPayload.fullName);
+  expect(responseText).not.toContain(validPayload.company);
+  expect(responseText).not.toContain(validPayload.profileUrl);
+  expect(responseText).not.toContain(validPayload.reason);
+  expect(responseText).not.toContain(d1DatabaseId);
 }
 
 function errorCodes(body: unknown): Array<[string, string]> {

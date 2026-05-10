@@ -11,7 +11,8 @@ keep_vars = true
 # Cloudflare Worker environment before deploying.
 ALLOWED_ORIGINS = "https://petrovc.github.io"
 PUBLIC_SITE_URL = "https://cv-request-worker.constantin-cv.workers.dev"
-TURNSTILE_DEBUG = "true"
+TURNSTILE_DEBUG = "false"
+CV_REQUEST_EMAIL_DEBUG = "false"
 
 # Configure secrets with `wrangler secret put`:
 # RESEND_API_KEY
@@ -21,7 +22,7 @@ TURNSTILE_DEBUG = "true"
 # TURNSTILE_SECRET_KEY
 
 [[d1_databases]]
-binding = "constantin_cv_requests"
+binding = "CV_REQUESTS_DB"
 database_name = "constantin-cv-requests"
 # Replace this all-zero placeholder with the real D1 database id only in local
 # deployment config. Do not commit a real database_id.
