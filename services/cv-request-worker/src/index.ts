@@ -39,6 +39,18 @@ const jsonHeaders = {
   'cache-control': 'no-store'
 } as const;
 
+const htmlDecisionHeaders = {
+  'content-type': 'text/html; charset=utf-8',
+  'cache-control': 'no-store',
+  'content-security-policy':
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  vary: 'Accept'
+} as const;
+
+const negotiatedDecisionHeaders = {
+  vary: 'Accept'
+} as const;
+
 const securityHeaders = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
@@ -94,7 +106,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
       }
 
       if (request.method === 'GET' && approvalRoute) {
-        return handleApprovalAction(url, env, approvalRoute, emailSender);
+        return handleApprovalAction(request, url, env, approvalRoute, emailSender);
       }
 
       if (url.pathname === '/health' || url.pathname === '/api/cv-requests' || approvalRoute) {
@@ -359,15 +371,17 @@ interface CvRequestDecisionRow {
 }
 
 async function handleApprovalAction(
+  request: Request,
   url: URL,
   env: Env,
   route: ApprovalRoute,
   emailSender: EmailSender
 ): Promise<Response> {
+  const responseFormat = readDecisionResponseFormat(request.headers.get('accept'));
   const token = url.searchParams.get('token')?.trim();
 
   if (!token) {
-    return invalidApprovalLinkResponse(401);
+    return invalidApprovalLinkResponse(responseFormat, 401);
   }
 
   let verification;
@@ -375,18 +389,20 @@ async function handleApprovalAction(
   try {
     verification = await verifyApprovalToken(token, env.APPROVAL_TOKEN_SECRET);
   } catch {
-    return invalidApprovalLinkResponse(401);
+    return invalidApprovalLinkResponse(responseFormat, 401);
   }
 
   if (!verification.ok) {
-    return invalidApprovalLinkResponse(401);
+    return verification.reason === 'expired'
+      ? expiredApprovalLinkResponse(responseFormat)
+      : invalidApprovalLinkResponse(responseFormat, 401);
   }
 
   if (
     verification.payload.action !== route.action ||
     verification.payload.requestId !== route.requestId
   ) {
-    return invalidApprovalLinkResponse(403);
+    return invalidApprovalLinkResponse(responseFormat, 403);
   }
 
   let existingRequest: CvRequestDecisionRow | null;
@@ -401,21 +417,23 @@ async function handleApprovalAction(
         .bind(route.requestId)
         .first<CvRequestDecisionRow>()) ?? null;
   } catch {
-    return serviceUnavailableResponse();
+    return decisionServiceUnavailableResponse(responseFormat);
   }
 
   if (!existingRequest) {
-    return jsonResponse(
+    return decisionResponse(
+      'not_found',
       {
         status: 'not_found',
         message: 'CV request was not found.'
       },
-      404
+      404,
+      responseFormat
     );
   }
 
   if (existingRequest.status !== 'pending') {
-    return alreadyFinalizedResponse();
+    return alreadyFinalizedResponse(responseFormat);
   }
 
   const nextStatus = route.action === 'approve' ? 'approved' : 'rejected';
@@ -431,10 +449,10 @@ async function handleApprovalAction(
       .run();
 
     if (readChangedRowCount(result) === 0) {
-      return alreadyFinalizedResponse();
+      return alreadyFinalizedResponse(responseFormat);
     }
   } catch {
-    return serviceUnavailableResponse();
+    return decisionServiceUnavailableResponse(responseFormat);
   }
 
   try {
@@ -448,13 +466,14 @@ async function handleApprovalAction(
     });
 
     if (!requesterNotificationResult.ok) {
-      return requesterNotificationFailedResponse(nextStatus);
+      return requesterNotificationFailedResponse(nextStatus, responseFormat);
     }
   } catch {
-    return requesterNotificationFailedResponse(nextStatus);
+    return requesterNotificationFailedResponse(nextStatus, responseFormat);
   }
 
-  return jsonResponse(
+  return decisionResponse(
+    nextStatus,
     {
       status: nextStatus,
       message:
@@ -462,7 +481,8 @@ async function handleApprovalAction(
           ? 'CV request approved. The requester was notified that CV delivery will happen in a later follow-up. No CV file or download link was sent.'
           : 'CV request rejected. The requester was notified.'
     },
-    200
+    200,
+    responseFormat
   );
 }
 
@@ -527,23 +547,127 @@ function readChangedRowCount(result: D1Result): number | undefined {
   return typeof changes === 'number' ? changes : undefined;
 }
 
-function invalidApprovalLinkResponse(status: 401 | 403): Response {
-  return jsonResponse(
+type DecisionResponseFormat = 'html' | 'json';
+
+type DecisionPageKind =
+  | 'approved'
+  | 'rejected'
+  | 'approved_notification_failed'
+  | 'rejected_notification_failed'
+  | 'already_finalized'
+  | 'invalid_token'
+  | 'expired_token'
+  | 'not_found'
+  | 'service_unavailable';
+
+interface DecisionResponseBody {
+  status: string;
+  message: string;
+}
+
+interface DecisionPageContent {
+  title: string;
+  badge: string;
+  explanation: string;
+  tone: 'success' | 'notice' | 'warning' | 'error';
+}
+
+const decisionPageContent: Record<DecisionPageKind, DecisionPageContent> = {
+  approved: {
+    title: 'CV Request Approved',
+    badge: 'Approved',
+    explanation:
+      'The decision has been recorded and the requester was notified. No CV file or download link was sent from this page.',
+    tone: 'success'
+  },
+  rejected: {
+    title: 'CV Request Rejected',
+    badge: 'Rejected',
+    explanation: 'The decision has been recorded and the requester was notified.',
+    tone: 'notice'
+  },
+  approved_notification_failed: {
+    title: 'Approval Recorded',
+    badge: 'Notification failed',
+    explanation:
+      'The approval was saved, but the requester notification could not be sent right now. No CV file or download link was sent from this page.',
+    tone: 'warning'
+  },
+  rejected_notification_failed: {
+    title: 'Rejection Recorded',
+    badge: 'Notification failed',
+    explanation:
+      'The rejection was saved, but the requester notification could not be sent right now.',
+    tone: 'warning'
+  },
+  already_finalized: {
+    title: 'Request Already Finalized',
+    badge: 'Already finalized',
+    explanation: 'This decision link has already been used, or the request was finalized earlier.',
+    tone: 'notice'
+  },
+  invalid_token: {
+    title: 'Invalid Decision Link',
+    badge: 'Invalid link',
+    explanation: 'This decision link could not be verified. No decision was changed.',
+    tone: 'error'
+  },
+  expired_token: {
+    title: 'Expired Decision Link',
+    badge: 'Expired link',
+    explanation: 'This decision link has expired. No decision was changed.',
+    tone: 'error'
+  },
+  not_found: {
+    title: 'Request Not Found',
+    badge: 'Not found',
+    explanation: 'The decision link is valid, but the request could not be found.',
+    tone: 'error'
+  },
+  service_unavailable: {
+    title: 'Service Temporarily Unavailable',
+    badge: 'Service error',
+    explanation: 'The decision could not be processed right now. Try again later.',
+    tone: 'error'
+  }
+};
+
+function invalidApprovalLinkResponse(
+  responseFormat: DecisionResponseFormat,
+  status: 401 | 403
+): Response {
+  return decisionResponse(
+    'invalid_token',
     {
       status: 'invalid_token',
-      message: 'The approval link is invalid or expired.'
+      message: 'The approval link is invalid.'
     },
-    status
+    status,
+    responseFormat
   );
 }
 
-function alreadyFinalizedResponse(): Response {
-  return jsonResponse(
+function expiredApprovalLinkResponse(responseFormat: DecisionResponseFormat): Response {
+  return decisionResponse(
+    'expired_token',
+    {
+      status: 'expired_token',
+      message: 'The approval link has expired.'
+    },
+    401,
+    responseFormat
+  );
+}
+
+function alreadyFinalizedResponse(responseFormat: DecisionResponseFormat): Response {
+  return decisionResponse(
+    'already_finalized',
     {
       status: 'already_finalized',
       message: 'This CV request has already been finalized.'
     },
-    409
+    409,
+    responseFormat
   );
 }
 
@@ -573,14 +697,31 @@ function serviceUnavailableResponse(
   return jsonResponse(body, 503, cors);
 }
 
-function requesterNotificationFailedResponse(status: 'approved' | 'rejected'): Response {
-  return jsonResponse(
+function decisionServiceUnavailableResponse(responseFormat: DecisionResponseFormat): Response {
+  return decisionResponse(
+    'service_unavailable',
+    {
+      status: 'service_unavailable',
+      message: 'The CV request service is temporarily unavailable. Try again later.'
+    },
+    503,
+    responseFormat
+  );
+}
+
+function requesterNotificationFailedResponse(
+  status: 'approved' | 'rejected',
+  responseFormat: DecisionResponseFormat
+): Response {
+  return decisionResponse(
+    status === 'approved' ? 'approved_notification_failed' : 'rejected_notification_failed',
     {
       status,
       message:
         'The decision was recorded, but requester notification could not be sent right now. No CV file or download link was sent.'
     },
-    200
+    200,
+    responseFormat
   );
 }
 
@@ -832,6 +973,217 @@ function normalizeOrigin(value: string | null | undefined): string | undefined {
 function isJsonContentType(contentType: string | null): boolean {
   const mediaType = contentType?.split(';', 1)[0]?.trim().toLowerCase();
   return mediaType === 'application/json';
+}
+
+function decisionResponse(
+  pageKind: DecisionPageKind,
+  body: DecisionResponseBody,
+  status: number,
+  responseFormat: DecisionResponseFormat
+): Response {
+  if (responseFormat === 'html') {
+    return htmlDecisionResponse(pageKind, status);
+  }
+
+  return jsonResponse(body, status, undefined, negotiatedDecisionHeaders);
+}
+
+function htmlDecisionResponse(pageKind: DecisionPageKind, status: number): Response {
+  return new Response(renderDecisionPage(decisionPageContent[pageKind]), {
+    status,
+    headers: createHeaders(htmlDecisionHeaders)
+  });
+}
+
+function renderDecisionPage(page: DecisionPageContent): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(page.title)}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f9;
+      color: #182230;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #f6f7f9;
+    }
+
+    main {
+      width: min(100%, 560px);
+      padding: 32px;
+      border: 1px solid #d7dde5;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 18px 50px rgba(16, 24, 40, 0.08);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid;
+      border-radius: 999px;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .success {
+      border-color: #abefc6;
+      background: #ecfdf3;
+      color: #05603a;
+    }
+
+    .notice {
+      border-color: #b9d6fe;
+      background: #eff6ff;
+      color: #1849a9;
+    }
+
+    .warning {
+      border-color: #fedf89;
+      background: #fffaeb;
+      color: #93370d;
+    }
+
+    .error {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #991b1b;
+    }
+
+    h1 {
+      margin: 20px 0 12px;
+      font-size: 1.75rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: #475467;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    .close {
+      margin-top: 24px;
+      color: #667085;
+      font-size: 0.9375rem;
+    }
+  </style>
+</head>
+<body>
+  <main aria-labelledby="decision-title">
+    <span class="badge ${escapeHtml(page.tone)}">${escapeHtml(page.badge)}</span>
+    <h1 id="decision-title">${escapeHtml(page.title)}</h1>
+    <p>${escapeHtml(page.explanation)}</p>
+    <p class="close">You may close this page.</p>
+  </main>
+</body>
+</html>`;
+}
+
+function readDecisionResponseFormat(acceptHeader: string | null): DecisionResponseFormat {
+  const accept = acceptHeader?.trim();
+
+  if (!accept) {
+    return 'json';
+  }
+
+  const htmlPreference = readMediaPreference(accept, 'text/html');
+  const jsonPreference = readMediaPreference(accept, 'application/json');
+
+  if (
+    jsonPreference &&
+    (!htmlPreference || isSameOrHigherMediaPreference(jsonPreference, htmlPreference))
+  ) {
+    return 'json';
+  }
+
+  return htmlPreference ? 'html' : 'json';
+}
+
+interface MediaPreference {
+  q: number;
+  index: number;
+}
+
+function readMediaPreference(accept: string, mediaType: string): MediaPreference | undefined {
+  let preference: MediaPreference | undefined;
+
+  accept.split(',').forEach((rawItem, index) => {
+    const [rawMediaType, ...rawParameters] = rawItem.split(';');
+    const itemMediaType = rawMediaType?.trim().toLowerCase();
+
+    if (itemMediaType !== mediaType) {
+      return;
+    }
+
+    const q = readMediaQuality(rawParameters);
+
+    if (q <= 0) {
+      return;
+    }
+
+    if (!preference || q > preference.q || (q === preference.q && index < preference.index)) {
+      preference = { q, index };
+    }
+  });
+
+  return preference;
+}
+
+function readMediaQuality(parameters: string[]): number {
+  for (const parameter of parameters) {
+    const [name, value] = parameter.split('=', 2);
+
+    if (name?.trim().toLowerCase() !== 'q') {
+      continue;
+    }
+
+    const q = Number(value?.trim());
+    return Number.isFinite(q) && q >= 0 && q <= 1 ? q : 0;
+  }
+
+  return 1;
+}
+
+function isSameOrHigherMediaPreference(left: MediaPreference, right: MediaPreference): boolean {
+  return left.q > right.q || (left.q === right.q && left.index < right.index);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => {
+    switch (character) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      default:
+        return '&#39;';
+    }
+  });
 }
 
 function jsonResponse(

@@ -27,6 +27,8 @@ const validTurnstileToken = 'test-turnstile-token';
 const turnstileErrorCodes = ['invalid-input-response', 'timeout-or-duplicate'];
 const d1DatabaseId = 'test-d1-database-id';
 const executionContext = {} as ExecutionContext;
+const browserAccept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+const jsonAccept = 'application/json, text/html;q=0.8';
 
 const validPayload: CvRequestPayload = {
   fullName: 'Alex Martin',
@@ -888,10 +890,15 @@ describe('cv request worker', () => {
   it('approves a pending request with a valid approve link and notifies the requester', async () => {
     const harness = createWorkerHarness();
     const { requestId, approveUrl } = await createPendingRequest(harness);
-    const response = await harness.fetchWorker(approveUrl);
+    const response = await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: jsonAccept
+      }
+    });
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
     expect(body).toEqual({
       status: 'approved',
       message:
@@ -903,6 +910,27 @@ describe('cv request worker', () => {
     });
     expect(Date.parse(harness.db.find(requestId)?.updatedAt ?? '')).not.toBeNaN();
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
+  });
+
+  it('returns a safe HTML approval page for browser Accept headers', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: browserAccept
+      }
+    });
+    const responseText = await expectDecisionHtml(response, 200, [
+      'CV Request Approved',
+      'Approved',
+      'You may close this page.'
+    ]);
+
+    expect(harness.db.find(requestId)?.status).toBe('approved');
+    expectDecisionPageNotToLeak(responseText, {
+      requestId,
+      approvalTokens: [readActionToken(approveUrl)]
+    });
   });
 
   it('rejects a pending request with a valid reject link and notifies the requester', async () => {
@@ -923,6 +951,27 @@ describe('cv request worker', () => {
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'rejected');
   });
 
+  it('returns a safe HTML rejection page for browser Accept headers', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, rejectUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(rejectUrl, {
+      headers: {
+        accept: browserAccept
+      }
+    });
+    const responseText = await expectDecisionHtml(response, 200, [
+      'CV Request Rejected',
+      'Rejected',
+      'You may close this page.'
+    ]);
+
+    expect(harness.db.find(requestId)?.status).toBe('rejected');
+    expectDecisionPageNotToLeak(responseText, {
+      requestId,
+      approvalTokens: [readActionToken(rejectUrl)]
+    });
+  });
+
   it('keeps the request approved when requester notification fails', async () => {
     const harness = createWorkerHarness({ failRequesterEmail: true });
     const { requestId, approveUrl } = await createPendingRequest(harness);
@@ -940,6 +989,41 @@ describe('cv request worker', () => {
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
   });
 
+  it('returns safe HTML notification failure pages for approve and reject decisions', async () => {
+    for (const scenario of [
+      {
+        decision: 'approved' as const,
+        expectedTitle: 'Approval Recorded',
+        readUrl: (links: { approveUrl: string; rejectUrl: string }) => links.approveUrl
+      },
+      {
+        decision: 'rejected' as const,
+        expectedTitle: 'Rejection Recorded',
+        readUrl: (links: { approveUrl: string; rejectUrl: string }) => links.rejectUrl
+      }
+    ]) {
+      const harness = createWorkerHarness({ failRequesterEmail: true });
+      const links = await createPendingRequest(harness);
+      const actionUrl = scenario.readUrl(links);
+      const response = await harness.fetchWorker(actionUrl, {
+        headers: {
+          accept: browserAccept
+        }
+      });
+      const responseText = await expectDecisionHtml(response, 200, [
+        scenario.expectedTitle,
+        'Notification failed',
+        'You may close this page.'
+      ]);
+
+      expect(harness.db.find(links.requestId)?.status).toBe(scenario.decision);
+      expectDecisionPageNotToLeak(responseText, {
+        requestId: links.requestId,
+        approvalTokens: [readActionToken(actionUrl)]
+      });
+    }
+  });
+
   it('rejects an invalid approval token', async () => {
     const harness = createWorkerHarness();
     const { requestId } = await createPendingRequest(harness);
@@ -949,7 +1033,7 @@ describe('cv request worker', () => {
 
     await expectJson(response, 401, {
       status: 'invalid_token',
-      message: 'The approval link is invalid or expired.'
+      message: 'The approval link is invalid.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
     expect(harness.emailSender.requesterNotifications).toHaveLength(0);
@@ -970,11 +1054,60 @@ describe('cv request worker', () => {
     );
 
     await expectJson(response, 401, {
-      status: 'invalid_token',
-      message: 'The approval link is invalid or expired.'
+      status: 'expired_token',
+      message: 'The approval link has expired.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
     expect(harness.emailSender.requesterNotifications).toHaveLength(0);
+  });
+
+  it('returns safe HTML pages for invalid and expired approval tokens', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const invalidToken = 'not-a-token';
+    const invalidResponse = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=${invalidToken}`,
+      {
+        headers: {
+          accept: browserAccept
+        }
+      }
+    );
+    const invalidResponseText = await expectDecisionHtml(invalidResponse, 401, [
+      'Invalid Decision Link',
+      'Invalid link',
+      'You may close this page.'
+    ]);
+    const expiredToken = await createApprovalToken({
+      requestId,
+      action: 'approve',
+      secret: approvalTokenSecret,
+      now: Date.now() - 60_000,
+      ttlSeconds: 1
+    });
+    const expiredResponse = await harness.fetchWorker(
+      `/api/cv-requests/${requestId}/approve?token=${expiredToken}`,
+      {
+        headers: {
+          accept: browserAccept
+        }
+      }
+    );
+    const expiredResponseText = await expectDecisionHtml(expiredResponse, 401, [
+      'Expired Decision Link',
+      'Expired link',
+      'You may close this page.'
+    ]);
+
+    expect(harness.db.find(requestId)?.status).toBe('pending');
+    expectDecisionPageNotToLeak(invalidResponseText, {
+      requestId,
+      approvalTokens: [readActionToken(approveUrl), invalidToken]
+    });
+    expectDecisionPageNotToLeak(expiredResponseText, {
+      requestId,
+      approvalTokens: [readActionToken(approveUrl), expiredToken]
+    });
   });
 
   it('rejects a token action mismatch', async () => {
@@ -991,7 +1124,7 @@ describe('cv request worker', () => {
 
     await expectJson(response, 403, {
       status: 'invalid_token',
-      message: 'The approval link is invalid or expired.'
+      message: 'The approval link is invalid.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
     expect(harness.emailSender.requesterNotifications).toHaveLength(0);
@@ -1012,7 +1145,7 @@ describe('cv request worker', () => {
 
     await expectJson(response, 403, {
       status: 'invalid_token',
-      message: 'The approval link is invalid or expired.'
+      message: 'The approval link is invalid.'
     });
     expect(harness.db.find(requestId)?.status).toBe('pending');
     expect(harness.emailSender.requesterNotifications).toHaveLength(0);
@@ -1037,6 +1170,35 @@ describe('cv request worker', () => {
     expect(harness.emailSender.requesterNotifications).toHaveLength(0);
   });
 
+  it('returns a safe HTML page when the signed request id does not exist', async () => {
+    const harness = createWorkerHarness();
+    const unknownRequestId = '22222222-2222-4222-8222-222222222222';
+    const token = await createApprovalToken({
+      requestId: unknownRequestId,
+      action: 'approve',
+      secret: approvalTokenSecret
+    });
+    const response = await harness.fetchWorker(
+      `/api/cv-requests/${unknownRequestId}/approve?token=${token}`,
+      {
+        headers: {
+          accept: browserAccept
+        }
+      }
+    );
+    const responseText = await expectDecisionHtml(response, 404, [
+      'Request Not Found',
+      'Not found',
+      'You may close this page.'
+    ]);
+
+    expectDecisionPageNotToLeak(responseText, {
+      requestId: unknownRequestId,
+      approvalTokens: [token]
+    });
+    expect(harness.emailSender.requesterNotifications).toHaveLength(0);
+  });
+
   it('returns 409 when the request has already been finalized', async () => {
     const harness = createWorkerHarness();
     const { requestId, approveUrl } = await createPendingRequest(harness);
@@ -1050,6 +1212,59 @@ describe('cv request worker', () => {
     });
     expect(harness.db.find(requestId)?.status).toBe('approved');
     expect(harness.emailSender.requesterNotifications).toHaveLength(1);
+  });
+
+  it('returns a safe HTML page when the request has already been finalized', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const firstResponse = await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: jsonAccept
+      }
+    });
+    const secondResponse = await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: browserAccept
+      }
+    });
+    const responseText = await expectDecisionHtml(secondResponse, 409, [
+      'Request Already Finalized',
+      'Already finalized',
+      'You may close this page.'
+    ]);
+
+    expect(firstResponse.status).toBe(200);
+    expect(harness.db.find(requestId)?.status).toBe('approved');
+    expectDecisionPageNotToLeak(responseText, {
+      requestId,
+      approvalTokens: [readActionToken(approveUrl)]
+    });
+    expect(harness.emailSender.requesterNotifications).toHaveLength(1);
+  });
+
+  it('returns a safe HTML page when a decision service error occurs', async () => {
+    const { fetchWorker } = createWorkerHarness({ omitD1Binding: true });
+    const requestId = '33333333-3333-4333-8333-333333333333';
+    const token = await createApprovalToken({
+      requestId,
+      action: 'approve',
+      secret: approvalTokenSecret
+    });
+    const response = await fetchWorker(`/api/cv-requests/${requestId}/approve?token=${token}`, {
+      headers: {
+        accept: browserAccept
+      }
+    });
+    const responseText = await expectDecisionHtml(response, 503, [
+      'Service Temporarily Unavailable',
+      'Service error',
+      'You may close this page.'
+    ]);
+
+    expectDecisionPageNotToLeak(responseText, {
+      requestId,
+      approvalTokens: [token]
+    });
   });
 
   it('returns 503 when persistence fails', async () => {
@@ -1708,6 +1923,77 @@ async function expectJson(
 ): Promise<void> {
   expect(response.status).toBe(status);
   await expect(response.json()).resolves.toEqual(expectedBody);
+}
+
+async function expectDecisionHtml(
+  response: Response,
+  status: number,
+  expectedText: string[]
+): Promise<string> {
+  const responseText = await response.text();
+
+  expect(response.status).toBe(status);
+  expect(response.headers.get('content-type')).toContain('text/html');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('vary')).toContain('Accept');
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(response.headers.get('x-frame-options')).toBe('DENY');
+  expect(response.headers.get('content-security-policy')).toContain("script-src 'none'");
+  expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  expect(responseText).toContain('<!doctype html>');
+  expect(responseText).toContain('<style>');
+  expect(responseText).not.toContain('<script');
+  expect(responseText).not.toContain('http://');
+  expect(responseText).not.toContain('https://');
+
+  for (const text of expectedText) {
+    expect(responseText).toContain(text);
+  }
+
+  return responseText;
+}
+
+function readActionToken(actionUrl: string): string {
+  const token = new URL(actionUrl).searchParams.get('token');
+
+  expect(token).toEqual(expect.any(String));
+
+  return token ?? '';
+}
+
+function expectDecisionPageNotToLeak(
+  responseText: string,
+  {
+    requestId,
+    approvalTokens = []
+  }: {
+    requestId?: string;
+    approvalTokens?: string[];
+  }
+): void {
+  expectSensitiveCvRequestDataNotToLeak(responseText, validTurnstileToken);
+  expect(responseText).not.toContain('fullName');
+  expect(responseText).not.toContain('requesterEmail');
+  expect(responseText).not.toContain('company');
+  expect(responseText).not.toContain('profileUrl');
+  expect(responseText).not.toContain('requestedCvType');
+  expect(responseText).not.toContain(validPayload.requestedCvType);
+  expect(responseText).not.toContain('requestedLanguage');
+  expect(responseText).not.toContain('reason');
+  expect(responseText).not.toContain(approvalTokenSecret);
+  expect(responseText).not.toContain('APPROVAL_TOKEN_SECRET');
+  expect(responseText).not.toContain('token=');
+  expect(responseText).not.toContain('?token');
+
+  if (requestId !== undefined) {
+    expect(responseText).not.toContain(requestId);
+  }
+
+  for (const token of approvalTokens) {
+    expect(token).not.toHaveLength(0);
+    expect(responseText).not.toContain(token);
+  }
 }
 
 interface ExpectedOwnerNotificationFailureDebugFields {
