@@ -22,6 +22,7 @@ const disallowedOrigin = 'https://not-allowed.example.test';
 const approvalTokenSecret = 'test-approval-token-secret';
 const turnstileSecret = 'test-turnstile-secret';
 const validTurnstileToken = 'test-turnstile-token';
+const turnstileErrorCodes = ['invalid-input-response', 'timeout-or-duplicate'];
 const executionContext = {} as ExecutionContext;
 
 const validPayload: CvRequestPayload = {
@@ -77,6 +78,27 @@ describe('cv request worker', () => {
     expect(form.get('secret')).toBe('site-secret');
     expect(form.get('response')).toBe('site-token');
     expect(form.get('remoteip')).toBe('203.0.113.10');
+  });
+
+  it('reads Cloudflare Siteverify error codes from failed Turnstile verification', async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': turnstileErrorCodes }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    const verifier = new CloudflareTurnstileVerifier(fetcher);
+    const result = await verifier.verify(
+      {
+        token: 'site-token'
+      },
+      {
+        TURNSTILE_SECRET_KEY: 'site-secret'
+      }
+    );
+
+    expect(result).toEqual({ ok: false, errorCodes: turnstileErrorCodes });
   });
 
   it('handles OPTIONS preflight for an allowed origin', async () => {
@@ -229,6 +251,56 @@ describe('cv request worker', () => {
       message: 'The anti-spam check failed. Try again.'
     });
     expect(turnstileVerifier.verifications).toHaveLength(1);
+  });
+
+  it('omits Turnstile error codes when TURNSTILE_DEBUG is disabled', async () => {
+    const { postCvRequest } = createWorkerHarness({
+      failTurnstile: true,
+      turnstileErrorCodes
+    });
+    const response = await postCvRequest(validPayload);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.'
+    });
+    expect(body).not.toHaveProperty('errorCodes');
+  });
+
+  it('includes Turnstile error codes when TURNSTILE_DEBUG is true', async () => {
+    const { postCvRequest } = createWorkerHarness({
+      failTurnstile: true,
+      turnstileDebug: true,
+      turnstileErrorCodes
+    });
+    const response = await postCvRequest(validPayload);
+
+    await expectJson(response, 403, {
+      status: 'turnstile_verification_failed',
+      message: 'The anti-spam check failed. Try again.',
+      errorCodes: turnstileErrorCodes
+    });
+  });
+
+  it('never returns the submitted Turnstile token in a failed verification response', async () => {
+    const submittedTurnstileToken = 'submitted-turnstile-token';
+    const { postCvRequest } = createWorkerHarness({
+      failTurnstile: true,
+      turnstileDebug: true,
+      turnstileErrorCodes
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(responseText).not.toContain(submittedTurnstileToken);
+    expect(responseText).not.toContain(turnstileSecret);
+    expect(responseText).not.toContain(validPayload.requesterEmail);
   });
 
   it('does not persist or send email when Turnstile verification fails', async () => {
@@ -722,6 +794,8 @@ interface HarnessOptions {
   failRequesterEmail?: boolean;
   failTurnstile?: boolean;
   omitTurnstileSecret?: boolean;
+  turnstileDebug?: boolean;
+  turnstileErrorCodes?: string[];
 }
 
 interface SentOwnerNotification {
@@ -776,7 +850,9 @@ class FakeTurnstileVerifier implements TurnstileVerifier<Env> {
   async verify(input: TurnstileVerificationInput, env: Env) {
     this.verifications.push({ input, env });
 
-    return this.options.failTurnstile ? { ok: false as const } : { ok: true as const };
+    return this.options.failTurnstile
+      ? { ok: false as const, errorCodes: this.options.turnstileErrorCodes }
+      : { ok: true as const };
   }
 }
 
@@ -899,7 +975,8 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com',
     APPROVAL_TOKEN_SECRET: approvalTokenSecret,
     PUBLIC_SITE_URL: 'https://www.example.com',
-    TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret
+    TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret,
+    TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined
   };
 
   const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
