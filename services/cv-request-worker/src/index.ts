@@ -570,14 +570,14 @@ function turnstileVerificationFailedResponse(
   const body: {
     status: string;
     message: string;
-    turnstileErrorCodes?: string[];
+    errorCodes?: string[];
   } = {
     status: 'turnstile_verification_failed',
     message: 'The anti-spam check failed. Try again.'
   };
 
   if (errorCodes) {
-    body.turnstileErrorCodes = errorCodes;
+    body.errorCodes = errorCodes;
   }
 
   return jsonResponse(body, 403, cors);
