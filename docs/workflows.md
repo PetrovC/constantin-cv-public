@@ -234,6 +234,17 @@ npm run pdf:generate
 
 The deployment workflow runs on `main`.
 
+Configure these public GitHub repository variables before GitHub Pages builds:
+
+```txt
+PUBLIC_CV_REQUEST_API_BASE_URL
+PUBLIC_TURNSTILE_SITE_KEY
+```
+
+They are intentionally public-safe values used by the static Astro build. Do
+not use GitHub secrets for these frontend values, and do not commit real values
+to source files.
+
 It must upload only:
 
 ```txt
