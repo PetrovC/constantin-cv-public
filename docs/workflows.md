@@ -159,10 +159,11 @@ email sending. Failed Turnstile verification returns `403`.
 
 For temporary Turnstile troubleshooting, set the optional Worker environment
 variable `TURNSTILE_DEBUG=true`. Failed Siteverify checks will then include only
-Cloudflare's `error-codes` array in the `403` JSON response. Leave it unset or
-set to any other value for the default safe response. The Worker must still
-never return Turnstile tokens, `TURNSTILE_SECRET_KEY`, requester emails, full
-request payloads, or Resend credentials.
+Cloudflare's `error-codes` array as `turnstileErrorCodes` in the `403` JSON
+response. Leave it unset or set to any other value for the default safe
+response. The Worker must still never return Turnstile tokens,
+`TURNSTILE_SECRET_KEY`, requester emails, full request payloads, or Resend
+credentials.
 
 The Worker currently has a rate-limiting abstraction only. Active rate limiting
 must be configured or implemented before connecting the public form; do not
