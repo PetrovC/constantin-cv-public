@@ -17,6 +17,7 @@ export interface Env {
   APPROVAL_TOKEN_SECRET: string;
   PUBLIC_SITE_URL?: string;
   TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_DEBUG?: string;
 }
 
 type JsonBody =
@@ -208,7 +209,10 @@ async function handleCvRequest(
   }
 
   if (!turnstileVerification.ok) {
-    return turnstileVerificationFailedResponse(cors);
+    return turnstileVerificationFailedResponse(
+      cors,
+      readTurnstileDebugErrorCodes(env, turnstileVerification.errorCodes)
+    );
   }
 
   const validation = validateCvRequestPayload(parsedBody.body);
@@ -559,15 +563,24 @@ function turnstileConfigurationErrorResponse(cors?: CorsContext): Response {
   );
 }
 
-function turnstileVerificationFailedResponse(cors?: CorsContext): Response {
-  return jsonResponse(
-    {
-      status: 'turnstile_verification_failed',
-      message: 'The anti-spam check failed. Try again.'
-    },
-    403,
-    cors
-  );
+function turnstileVerificationFailedResponse(
+  cors?: CorsContext,
+  errorCodes?: string[]
+): Response {
+  const body: {
+    status: string;
+    message: string;
+    errorCodes?: string[];
+  } = {
+    status: 'turnstile_verification_failed',
+    message: 'The anti-spam check failed. Try again.'
+  };
+
+  if (errorCodes) {
+    body.errorCodes = errorCodes;
+  }
+
+  return jsonResponse(body, 403, cors);
 }
 
 function methodNotAllowedResponse(pathname: string, cors?: CorsContext): Response {
@@ -606,6 +619,13 @@ function readTurnstileToken(body: unknown): string | undefined {
   const trimmedToken = typeof token === 'string' ? token.trim() : '';
 
   return trimmedToken ? trimmedToken : undefined;
+}
+
+function readTurnstileDebugErrorCodes(
+  env: Env,
+  errorCodes: string[] | undefined
+): string[] | undefined {
+  return env.TURNSTILE_DEBUG === 'true' ? (errorCodes ?? []) : undefined;
 }
 
 function readCfConnectingIp(request: Request): string | undefined {

@@ -13,6 +13,7 @@ export type TurnstileVerificationResult =
     }
   | {
       ok: false;
+      errorCodes?: string[];
     };
 
 export interface TurnstileVerifier<TEnv extends TurnstileEnv = TurnstileEnv> {
@@ -59,7 +60,7 @@ export class CloudflareTurnstileVerifier<TEnv extends TurnstileEnv = TurnstileEn
       return { ok: false };
     }
 
-    return body.success ? { ok: true } : { ok: false };
+    return body.success ? { ok: true } : { ok: false, errorCodes: body['error-codes'] };
   }
 }
 
@@ -73,11 +74,22 @@ function readRequiredSecret(value: string | undefined): string {
   return trimmedValue;
 }
 
-function isSiteverifyResponse(value: unknown): value is { success: boolean } {
+function isSiteverifyResponse(value: unknown): value is {
+  success: boolean;
+  'error-codes'?: string[];
+} {
   return (
     typeof value === 'object' &&
     value !== null &&
     'success' in value &&
-    typeof (value as { success?: unknown }).success === 'boolean'
+    typeof (value as { success?: unknown }).success === 'boolean' &&
+    isOptionalStringArray((value as { 'error-codes'?: unknown })['error-codes'])
+  );
+}
+
+function isOptionalStringArray(value: unknown): value is string[] | undefined {
+  return (
+    value === undefined ||
+    (Array.isArray(value) && value.every((item) => typeof item === 'string'))
   );
 }
