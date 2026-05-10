@@ -1,6 +1,7 @@
 name = "cv-request-worker"
 main = "src/index.ts"
 compatibility_date = "2026-05-09"
+keep_vars = true
 
 # Public-safe placeholder config only.
 # Do not commit account_id values, D1 database ids, secrets, or private data.
@@ -10,6 +11,7 @@ compatibility_date = "2026-05-09"
 # Cloudflare Worker environment before deploying.
 ALLOWED_ORIGINS = "https://petrovc.github.io"
 PUBLIC_SITE_URL = "https://cv-request-worker.constantin-cv.workers.dev"
+TURNSTILE_DEBUG = "true"
 
 # Configure secrets with `wrangler secret put`:
 # RESEND_API_KEY
@@ -25,3 +27,15 @@ database_name = "constantin-cv-requests"
 # deployment config. Do not commit a real database_id.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
