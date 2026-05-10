@@ -71,6 +71,21 @@ interface OwnerNotificationDebugFields {
   resendErrorName?: string;
 }
 
+type AuditEventType =
+  | 'request_created'
+  | 'owner_notification_sent'
+  | 'owner_notification_failed'
+  | 'request_approved'
+  | 'request_rejected'
+  | 'requester_notification_sent'
+  | 'requester_notification_failed';
+
+interface AuditEventMetadata {
+  failureKind?: string;
+  httpStatus?: number;
+  resendErrorName?: string;
+}
+
 interface WorkerDependencies {
   emailSender?: EmailSender;
   rateLimiter?: RateLimiter<Env>;
@@ -295,8 +310,11 @@ async function handleCvRequest(
     );
   }
 
+  await recordAuditEvent(env, requestId, 'request_created');
+
   let ownerNotificationStatus: OwnerNotificationStatus = 'sent';
   let ownerNotificationResult: EmailSendResult | undefined;
+  let ownerNotificationAuditMetadata: AuditEventMetadata | undefined;
 
   try {
     const actionLinks = await createOwnerActionLinks(request.url, env, requestId);
@@ -307,9 +325,20 @@ async function handleCvRequest(
       actionLinks
     });
     ownerNotificationStatus = ownerNotificationResult.ok ? 'sent' : 'failed';
+    ownerNotificationAuditMetadata = readEmailFailureAuditMetadata(ownerNotificationResult);
   } catch {
     ownerNotificationStatus = 'failed';
+    ownerNotificationAuditMetadata = { failureKind: 'exception' };
   }
+
+  await recordAuditEvent(
+    env,
+    requestId,
+    ownerNotificationStatus === 'sent'
+      ? 'owner_notification_sent'
+      : 'owner_notification_failed',
+    ownerNotificationAuditMetadata
+  );
 
   return acceptedCvRequestResponse(
     requestId,
@@ -455,6 +484,12 @@ async function handleApprovalAction(
     return decisionServiceUnavailableResponse(responseFormat);
   }
 
+  await recordAuditEvent(
+    env,
+    route.requestId,
+    route.action === 'approve' ? 'request_approved' : 'request_rejected'
+  );
+
   try {
     const requesterNotificationResult = await emailSender.sendRequesterDecisionNotification(env, {
       requestId: existingRequest.id,
@@ -466,11 +501,22 @@ async function handleApprovalAction(
     });
 
     if (!requesterNotificationResult.ok) {
+      await recordAuditEvent(
+        env,
+        route.requestId,
+        'requester_notification_failed',
+        readEmailFailureAuditMetadata(requesterNotificationResult)
+      );
       return requesterNotificationFailedResponse(nextStatus, responseFormat);
     }
   } catch {
+    await recordAuditEvent(env, route.requestId, 'requester_notification_failed', {
+      failureKind: 'exception'
+    });
     return requesterNotificationFailedResponse(nextStatus, responseFormat);
   }
+
+  await recordAuditEvent(env, route.requestId, 'requester_notification_sent');
 
   return decisionResponse(
     nextStatus,
@@ -545,6 +591,87 @@ function readApprovalRoute(pathname: string): ApprovalRoute | undefined {
 function readChangedRowCount(result: D1Result): number | undefined {
   const changes = result.meta?.changes;
   return typeof changes === 'number' ? changes : undefined;
+}
+
+async function recordAuditEvent(
+  env: Env,
+  requestId: string,
+  eventType: AuditEventType,
+  metadata?: AuditEventMetadata
+): Promise<void> {
+  try {
+    await env.CV_REQUESTS_DB.prepare(
+      `INSERT INTO cv_request_events (
+        id,
+        requestId,
+        eventType,
+        createdAt,
+        metadataJson
+      ) VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        requestId,
+        eventType,
+        new Date().toISOString(),
+        createAuditMetadataJson(metadata)
+      )
+      .run();
+  } catch {
+    // Audit writes are intentionally best-effort and must not expose internal errors.
+  }
+}
+
+function readEmailFailureAuditMetadata(
+  result: EmailSendResult | undefined
+): AuditEventMetadata | undefined {
+  if (!result || result.ok) {
+    return undefined;
+  }
+
+  const metadata: AuditEventMetadata = {
+    failureKind: result.failureKind
+  };
+
+  if ('httpStatus' in result && typeof result.httpStatus === 'number') {
+    metadata.httpStatus = result.httpStatus;
+  }
+
+  if (result.failureKind === 'resend_http_error' && result.errorName !== undefined) {
+    metadata.resendErrorName = result.errorName;
+  }
+
+  return metadata;
+}
+
+function createAuditMetadataJson(metadata: AuditEventMetadata | undefined): string | null {
+  if (!metadata) {
+    return null;
+  }
+
+  const safeMetadata: AuditEventMetadata = {};
+
+  if (metadata.failureKind && /^[a-z0-9_:-]{1,80}$/u.test(metadata.failureKind)) {
+    safeMetadata.failureKind = metadata.failureKind;
+  }
+
+  if (
+    typeof metadata.httpStatus === 'number' &&
+    Number.isInteger(metadata.httpStatus) &&
+    metadata.httpStatus >= 100 &&
+    metadata.httpStatus <= 599
+  ) {
+    safeMetadata.httpStatus = metadata.httpStatus;
+  }
+
+  if (
+    metadata.resendErrorName &&
+    /^[A-Za-z0-9._:-]{1,120}$/u.test(metadata.resendErrorName)
+  ) {
+    safeMetadata.resendErrorName = metadata.resendErrorName;
+  }
+
+  return Object.keys(safeMetadata).length > 0 ? JSON.stringify(safeMetadata) : null;
 }
 
 type DecisionResponseFormat = 'html' | 'json';

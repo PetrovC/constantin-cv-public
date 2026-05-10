@@ -96,6 +96,12 @@ Apply D1 migrations to the local Wrangler database:
 npm run db:migrate:local --workspace services/cv-request-worker
 ```
 
+Inspect recent local audit events without selecting requester payload data:
+
+```powershell
+npm exec --workspace services/cv-request-worker -- wrangler d1 execute cv-request-worker --local --command "SELECT eventType, requestId, createdAt, metadataJson FROM cv_request_events ORDER BY createdAt DESC LIMIT 20;"
+```
+
 Run the local Worker dev server:
 
 ```powershell
@@ -180,6 +186,18 @@ Then apply migrations to the remote D1 database:
 ```powershell
 npm run db:migrate:remote --workspace services/cv-request-worker
 ```
+
+Inspect recent remote audit events safely:
+
+```powershell
+npm exec --workspace services/cv-request-worker -- wrangler d1 execute cv-request-worker --remote --command "SELECT eventType, requestId, createdAt, metadataJson FROM cv_request_events ORDER BY createdAt DESC LIMIT 20;"
+```
+
+Routine audit inspection should use `cv_request_events` only. That table stores
+event type, request id, timestamp, and allowlisted metadata such as notification
+failure kind or HTTP status. It must not contain requester email, full name,
+company, reason/context, Turnstile tokens, approval tokens, secrets, raw Resend
+responses, or raw exception messages.
 
 ## Local private PDF generation
 

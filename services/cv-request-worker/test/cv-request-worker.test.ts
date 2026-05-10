@@ -628,6 +628,7 @@ describe('cv request worker', () => {
 
     expect(response.status).toBe(403);
     expect(db.inserts).toHaveLength(0);
+    expect(db.events).toHaveLength(0);
     expect(emailSender.notifications).toHaveLength(0);
   });
 
@@ -718,6 +719,11 @@ describe('cv request worker', () => {
       body.requestId,
       'reject'
     );
+    expectAuditEvents(db, body.requestId, [
+      'request_created',
+      'owner_notification_sent'
+    ]);
+    expectAuditMetadataNotToLeakPrivateData(db);
   });
 
   it('keeps the request persisted and returns 202 when owner notification fails', async () => {
@@ -744,6 +750,92 @@ describe('cv request worker', () => {
         approve: expect.any(String),
         reject: expect.any(String)
       }
+    });
+    expectAuditEvents(db, body.requestId, [
+      'request_created',
+      'owner_notification_failed'
+    ]);
+    expect(expectAuditEventMetadata(db, 'owner_notification_failed')).toEqual({
+      failureKind: 'resend_fetch_exception'
+    });
+    expectAuditMetadataNotToLeakPrivateData(db);
+  });
+
+  it('keeps the request flow stable when audit event writes fail', async () => {
+    const { db, emailSender, postCvRequest } = createWorkerHarness({
+      failAuditWrites: true
+    });
+    const response = await postCvRequest(validPayload);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(202);
+    expect(JSON.parse(responseText)).toMatchObject({
+      status: 'pending',
+      message: 'Your CV request was received and is pending review.'
+    });
+    expect(db.inserts).toHaveLength(1);
+    expect(db.events).toHaveLength(0);
+    expect(emailSender.notifications).toHaveLength(1);
+    expectSensitiveCvRequestDataNotToLeak(responseText, validTurnstileToken);
+    expect(responseText).not.toContain('Audit write failed');
+  });
+
+  it('stores only privacy-safe audit metadata from notification failures', async () => {
+    const submittedTurnstileToken = 'audit-metadata-submitted-turnstile-token';
+    const rawPrivateResendMessage =
+      `Raw Resend payload: requester=${validPayload.requesterEmail}; ` +
+      `name=${validPayload.fullName}; company=${validPayload.company}; ` +
+      `reason=${validPayload.reason}; token=${submittedTurnstileToken}; ` +
+      'apiKey=test-resend-api-key.';
+    const resendRequestBodies: BodyInit[] = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      if (init?.body !== undefined && init.body !== null) {
+        resendRequestBodies.push(init.body);
+      }
+
+      return new Response(
+        JSON.stringify({
+          name: 'validation_error',
+          message: rawPrivateResendMessage,
+          payload: validPayload,
+          turnstileToken: submittedTurnstileToken,
+          secret: turnstileSecret,
+          approvalTokenSecret
+        }),
+        {
+          status: 403,
+          headers: {
+            'content-type': 'application/json'
+          }
+        }
+      );
+    };
+    const { db, postCvRequest } = createResendWorkerHarness(fetcher, {
+      cvRequestEmailDebug: true
+    });
+    const response = await postCvRequest({
+      ...validPayload,
+      turnstileToken: submittedTurnstileToken
+    });
+    const body = (await response.json()) as { requestId: string };
+    const approvalTokens = readApprovalTokensFromOwnerEmailText(
+      parseResendEmailRequestBody(resendRequestBodies[0]).text
+    );
+
+    expect(response.status).toBe(202);
+    expectAuditEvents(db, body.requestId, [
+      'request_created',
+      'owner_notification_failed'
+    ]);
+    expect(expectAuditEventMetadata(db, 'owner_notification_failed')).toEqual({
+      failureKind: 'resend_http_error',
+      httpStatus: 403,
+      resendErrorName: 'validation_error'
+    });
+    expectAuditMetadataNotToLeakPrivateData(db, {
+      submittedTurnstileToken,
+      approvalTokens,
+      rawPrivateValues: [rawPrivateResendMessage]
     });
   });
 
@@ -910,6 +1002,15 @@ describe('cv request worker', () => {
     });
     expect(Date.parse(harness.db.find(requestId)?.updatedAt ?? '')).not.toBeNaN();
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
+    expectAuditEvents(harness.db, requestId, [
+      'request_created',
+      'owner_notification_sent',
+      'request_approved',
+      'requester_notification_sent'
+    ]);
+    expectAuditMetadataNotToLeakPrivateData(harness.db, {
+      approvalTokens: [readActionToken(approveUrl)]
+    });
   });
 
   it('returns a safe HTML approval page for browser Accept headers', async () => {
@@ -949,6 +1050,15 @@ describe('cv request worker', () => {
       status: 'rejected'
     });
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'rejected');
+    expectAuditEvents(harness.db, requestId, [
+      'request_created',
+      'owner_notification_sent',
+      'request_rejected',
+      'requester_notification_sent'
+    ]);
+    expectAuditMetadataNotToLeakPrivateData(harness.db, {
+      approvalTokens: [readActionToken(rejectUrl)]
+    });
   });
 
   it('returns a safe HTML rejection page for browser Accept headers', async () => {
@@ -987,6 +1097,18 @@ describe('cv request worker', () => {
       status: 'approved'
     });
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
+    expectAuditEvents(harness.db, requestId, [
+      'request_created',
+      'owner_notification_sent',
+      'request_approved',
+      'requester_notification_failed'
+    ]);
+    expect(expectAuditEventMetadata(harness.db, 'requester_notification_failed')).toEqual({
+      failureKind: 'resend_fetch_exception'
+    });
+    expectAuditMetadataNotToLeakPrivateData(harness.db, {
+      approvalTokens: [readActionToken(approveUrl)]
+    });
   });
 
   it('returns safe HTML notification failure pages for approve and reject decisions', async () => {
@@ -1385,6 +1507,7 @@ describe('cv request worker', () => {
 
     expect(response.status).toBe(400);
     expect(db.inserts).toHaveLength(0);
+    expect(db.events).toHaveLength(0);
     expect(emailSender.notifications).toHaveLength(0);
   });
 
@@ -1506,8 +1629,17 @@ interface InsertedCvRequest {
   updatedAt: string;
 }
 
+interface InsertedCvRequestEvent {
+  id: string;
+  requestId: string;
+  eventType: string;
+  createdAt: string;
+  metadataJson: string | null;
+}
+
 interface HarnessOptions {
   failWrites?: boolean;
+  failAuditWrites?: boolean;
   failEmail?: boolean;
   failRequesterEmail?: boolean;
   failTurnstile?: boolean;
@@ -1596,6 +1728,7 @@ class FakeTurnstileVerifier implements TurnstileVerifier<Env> {
 class FakeD1Database {
   readonly databaseId = d1DatabaseId;
   readonly inserts: InsertedCvRequest[] = [];
+  readonly events: InsertedCvRequestEvent[] = [];
 
   constructor(private readonly options: HarnessOptions = {}) {}
 
@@ -1615,6 +1748,26 @@ class FakeD1Database {
   }
 
   private async run(query: string, values: unknown[]) {
+    if (query.startsWith('insert into cv_request_events')) {
+      if (this.options.failAuditWrites) {
+        throw new Error(
+          `Audit write failed with token=${approvalTokenSecret}; requester=${validPayload.requesterEmail}`
+        );
+      }
+
+      const [id, requestId, eventType, createdAt, metadataJson] = values;
+
+      this.events.push({
+        id: String(id),
+        requestId: String(requestId),
+        eventType: String(eventType),
+        createdAt: String(createdAt),
+        metadataJson: metadataJson === null ? null : String(metadataJson)
+      });
+
+      return fakeD1Result(1);
+    }
+
     if (this.options.failWrites) {
       throw new Error(
         `D1 write failed for requester=${String(values[2])}; database=${d1DatabaseId}`
@@ -1914,6 +2067,87 @@ function expectRequesterDecisionNotification(
     requestedLanguage: validPayload.requestedLanguage,
     decision
   });
+}
+
+function expectAuditEvents(
+  db: FakeD1Database,
+  requestId: string,
+  expectedEventTypes: string[]
+): void {
+  const events = db.events.filter((event) => event.requestId === requestId);
+
+  expect(events.map((event) => event.eventType)).toEqual(expectedEventTypes);
+
+  for (const event of events) {
+    expect(event.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    expect(event.requestId).toBe(requestId);
+    expect(Date.parse(event.createdAt)).not.toBeNaN();
+
+    if (event.metadataJson !== null) {
+      expect(() => JSON.parse(event.metadataJson ?? '')).not.toThrow();
+    }
+  }
+}
+
+function expectAuditEventMetadata(
+  db: FakeD1Database,
+  eventType: string
+): Record<string, unknown> | null {
+  const event = db.events.find((candidate) => candidate.eventType === eventType);
+
+  expect(event).toBeDefined();
+
+  return event?.metadataJson ? (JSON.parse(event.metadataJson) as Record<string, unknown>) : null;
+}
+
+function expectAuditMetadataNotToLeakPrivateData(
+  db: FakeD1Database,
+  {
+    submittedTurnstileToken = validTurnstileToken,
+    approvalTokens = [],
+    rawPrivateValues = []
+  }: {
+    submittedTurnstileToken?: string;
+    approvalTokens?: string[];
+    rawPrivateValues?: string[];
+  } = {}
+): void {
+  const metadataText = db.events.map((event) => event.metadataJson ?? '').join('\n');
+
+  expect(metadataText).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu);
+  expect(metadataText).not.toContain(submittedTurnstileToken);
+  expect(metadataText).not.toContain('turnstileToken');
+  expect(metadataText).not.toContain(turnstileSecret);
+  expect(metadataText).not.toContain('TURNSTILE_SECRET_KEY');
+  expect(metadataText).not.toContain(validPayload.requesterEmail);
+  expect(metadataText).not.toContain('requesterEmail');
+  expect(metadataText).not.toContain(validPayload.fullName);
+  expect(metadataText).not.toContain('fullName');
+  expect(metadataText).not.toContain(validPayload.company);
+  expect(metadataText).not.toContain('company');
+  expect(metadataText).not.toContain(validPayload.reason);
+  expect(metadataText).not.toContain('reason');
+  expect(metadataText).not.toContain('context');
+  expect(metadataText).not.toContain('token=');
+  expect(metadataText).not.toContain('?token');
+  expect(metadataText).not.toContain(approvalTokenSecret);
+  expect(metadataText).not.toContain('approvalTokenSecret');
+  expect(metadataText).not.toContain('APPROVAL_TOKEN_SECRET');
+  expect(metadataText).not.toContain('test-resend-api-key');
+  expect(metadataText).not.toContain('RESEND_API_KEY');
+  expect(metadataText).not.toContain('Raw Resend');
+  expect(metadataText).not.toContain('payload');
+
+  for (const approvalToken of approvalTokens) {
+    expect(approvalToken).not.toHaveLength(0);
+    expect(metadataText).not.toContain(approvalToken);
+  }
+
+  for (const rawPrivateValue of rawPrivateValues) {
+    expect(metadataText).not.toContain(rawPrivateValue);
+  }
 }
 
 async function expectJson(
