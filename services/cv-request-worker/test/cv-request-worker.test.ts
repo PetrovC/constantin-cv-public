@@ -23,12 +23,14 @@ const allowedOrigin = 'https://portfolio.example.test';
 const disallowedOrigin = 'https://not-allowed.example.test';
 const approvalTokenSecret = 'test-approval-token-secret';
 const turnstileSecret = 'test-turnstile-secret';
+const adminApiToken = 'test-admin-api-token';
 const validTurnstileToken = 'test-turnstile-token';
 const turnstileErrorCodes = ['invalid-input-response', 'timeout-or-duplicate'];
 const d1DatabaseId = 'test-d1-database-id';
 const executionContext = {} as ExecutionContext;
 const browserAccept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 const jsonAccept = 'application/json, text/html;q=0.8';
+const adminRecentRequestsPath = '/api/admin/cv-requests/recent';
 
 const validPayload: CvRequestPayload = {
   fullName: 'Alex Martin',
@@ -660,6 +662,198 @@ describe('cv request worker', () => {
     expect(response.headers.get('content-security-policy')).toBe(
       "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
     );
+  });
+
+  it('returns 503 when ADMIN_API_TOKEN is missing', async () => {
+    const { fetchWorker } = createWorkerHarness({ omitAdminApiToken: true });
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders()
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'configuration_error',
+      message: 'The admin CV request service is not configured right now.'
+    });
+    expect(responseText).not.toContain('ADMIN_API_TOKEN');
+    expect(responseText).not.toContain(adminApiToken);
+  });
+
+  it('returns 401 when admin Authorization is missing', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker(adminRecentRequestsPath);
+
+    await expectJson(response, 401, {
+      status: 'unauthorized',
+      message: 'Admin authorization is required.'
+    });
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  it('returns 403 when admin Authorization is invalid', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders('wrong-admin-token')
+    });
+
+    await expectJson(response, 403, {
+      status: 'forbidden',
+      message: 'Admin authorization was rejected.'
+    });
+  });
+
+  it('returns recent CV request summaries for valid admin Authorization', async () => {
+    const harness = createWorkerHarness();
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: jsonAccept
+      }
+    });
+    const storedRequest = harness.db.find(requestId);
+    const response = await harness.fetchWorker(adminRecentRequestsPath, {
+      headers: {
+        ...adminAuthHeaders(),
+        origin: allowedOrigin
+      }
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      status: 'ok',
+      limit: 20,
+      requests: [
+        {
+          requestId,
+          status: 'approved',
+          requestedCvType: validPayload.requestedCvType,
+          requestedLanguage: validPayload.requestedLanguage,
+          createdAt: storedRequest?.createdAt,
+          updatedAt: storedRequest?.updatedAt,
+          eventTypes: [
+            'request_created',
+            'owner_notification_sent',
+            'request_approved',
+            'requester_notification_sent'
+          ]
+        }
+      ]
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('defaults the admin recent request limit to 20', async () => {
+    const { db, fetchWorker } = createWorkerHarness();
+
+    for (let index = 0; index < 21; index += 1) {
+      seedCvRequest(db, index);
+    }
+
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders()
+    });
+    const body = (await response.json()) as AdminRecentRequestsResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.limit).toBe(20);
+    expect(body.requests).toHaveLength(20);
+  });
+
+  it('caps the admin recent request limit to 50', async () => {
+    const { db, fetchWorker } = createWorkerHarness();
+
+    for (let index = 0; index < 51; index += 1) {
+      seedCvRequest(db, index);
+    }
+
+    const response = await fetchWorker(`${adminRecentRequestsPath}?limit=500`, {
+      headers: adminAuthHeaders()
+    });
+    const body = (await response.json()) as AdminRecentRequestsResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.limit).toBe(50);
+    expect(body.requests).toHaveLength(50);
+  });
+
+  it('returns a safe 400 for an invalid admin recent request limit', async () => {
+    const { fetchWorker } = createWorkerHarness();
+    const response = await fetchWorker(`${adminRecentRequestsPath}?limit=not-a-number`, {
+      headers: adminAuthHeaders()
+    });
+
+    await expectJson(response, 400, {
+      status: 'validation_error',
+      message: 'Use a positive integer limit no greater than 50.'
+    });
+  });
+
+  it('includes request status and event types in admin summaries', async () => {
+    const { db, fetchWorker } = createWorkerHarness();
+    const seededRequest = seedCvRequest(db, 0, {
+      status: 'rejected',
+      eventTypes: ['request_created', 'request_rejected', 'requester_notification_sent']
+    });
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders()
+    });
+    const body = (await response.json()) as AdminRecentRequestsResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.requests[0]).toMatchObject({
+      requestId: seededRequest.id,
+      status: 'rejected',
+      eventTypes: ['request_created', 'request_rejected', 'requester_notification_sent']
+    });
+  });
+
+  it('does not include private request fields or secrets in admin summaries', async () => {
+    const { db, fetchWorker } = createWorkerHarness();
+    const privateValues = [
+      'Private Admin Test Name',
+      'private.admin.requester@example.com',
+      'Private Admin Company',
+      'https://www.example.com/private/admin-profile',
+      'Private admin reason context',
+      validTurnstileToken,
+      approvalTokenSecret,
+      adminApiToken,
+      'test-resend-api-key',
+      'Raw Resend payload',
+      'Raw exception detail'
+    ];
+    seedCvRequest(db, 0, {
+      fullName: privateValues[0],
+      requesterEmail: privateValues[1],
+      company: privateValues[2],
+      profileUrl: privateValues[3],
+      reason: privateValues[4]
+    });
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders()
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(200);
+    expectAdminResponseNotToLeak(responseText, privateValues);
+  });
+
+  it('returns a safe 503 when the admin D1 query fails', async () => {
+    const { fetchWorker } = createWorkerHarness({ failAdminReads: true });
+    const response = await fetchWorker(adminRecentRequestsPath, {
+      headers: adminAuthHeaders()
+    });
+    const responseText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'service_unavailable',
+      message: 'The admin CV request service is temporarily unavailable. Try again later.'
+    });
+    expect(responseText).not.toContain('Admin D1 read failed');
+    expect(responseText).not.toContain(validPayload.requesterEmail);
+    expect(responseText).not.toContain(adminApiToken);
   });
 
   it('persists a valid request, sends the owner notification, and returns 202', async () => {
@@ -1637,14 +1831,30 @@ interface InsertedCvRequestEvent {
   metadataJson: string | null;
 }
 
+interface AdminRecentRequestsResponse {
+  status: string;
+  limit: number;
+  requests: Array<{
+    requestId: string;
+    status: string;
+    requestedCvType: string;
+    requestedLanguage: string;
+    createdAt: string;
+    updatedAt: string;
+    eventTypes: string[];
+  }>;
+}
+
 interface HarnessOptions {
   failWrites?: boolean;
   failAuditWrites?: boolean;
+  failAdminReads?: boolean;
   failEmail?: boolean;
   failRequesterEmail?: boolean;
   failTurnstile?: boolean;
   throwTurnstile?: boolean;
   omitD1Binding?: boolean;
+  omitAdminApiToken?: boolean;
   omitTurnstileSecret?: boolean;
   cvRequestDebug?: boolean;
   cvRequestEmailDebug?: boolean;
@@ -1738,7 +1948,8 @@ class FakeD1Database {
     return {
       bind: (...values: unknown[]) => ({
         run: async () => this.run(normalizedQuery, values),
-        first: async <T>() => this.first<T>(normalizedQuery, values)
+        first: async <T>() => this.first<T>(normalizedQuery, values),
+        all: async <T>() => this.all<T>(normalizedQuery, values)
       })
     };
   }
@@ -1847,6 +2058,69 @@ class FakeD1Database {
 
     return null;
   }
+
+  private async all<T>(query: string, values: unknown[]): Promise<D1Result<T>> {
+    if (
+      query.startsWith(
+        'select r.id as requestid, r.status as status, r.requestedcvtype as requestedcvtype'
+      )
+    ) {
+      if (this.options.failAdminReads) {
+        throw new Error(
+          `Admin D1 read failed for requester=${validPayload.requesterEmail}; token=${adminApiToken}`
+        );
+      }
+
+      const limit = Number(values[0]);
+      const recentRequests = [...this.inserts]
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, limit);
+      const rows: Array<{
+        requestId: string;
+        status: string;
+        requestedCvType: string;
+        requestedLanguage: string;
+        createdAt: string;
+        updatedAt: string;
+        eventType: string | null;
+      }> = [];
+
+      for (const request of recentRequests) {
+        const events = this.events
+          .filter((event) => event.requestId === request.id)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+        if (events.length === 0) {
+          rows.push({
+            requestId: request.id,
+            status: request.status,
+            requestedCvType: request.requestedCvType,
+            requestedLanguage: request.requestedLanguage,
+            createdAt: request.createdAt,
+            updatedAt: request.updatedAt,
+            eventType: null
+          });
+          continue;
+        }
+
+        for (const event of events) {
+          rows.push({
+            requestId: request.id,
+            status: request.status,
+            requestedCvType: request.requestedCvType,
+            requestedLanguage: request.requestedLanguage,
+            createdAt: request.createdAt,
+            updatedAt: request.updatedAt,
+            eventType: event.eventType
+          });
+        }
+      }
+
+      return fakeD1Rows(rows as T[]);
+    }
+
+    return fakeD1Rows<T>([]);
+  }
 }
 
 function createWorkerHarness(options: HarnessOptions = {}): {
@@ -1869,6 +2143,7 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     APPROVAL_TOKEN_SECRET: approvalTokenSecret,
     PUBLIC_SITE_URL: 'https://www.example.com',
     TURNSTILE_SECRET_KEY: options.omitTurnstileSecret ? undefined : turnstileSecret,
+    ADMIN_API_TOKEN: options.omitAdminApiToken ? undefined : adminApiToken,
     TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined,
     CV_REQUEST_DEBUG: options.cvRequestDebug ? 'true' : undefined,
     CV_REQUEST_EMAIL_DEBUG: options.cvRequestEmailDebug ? 'true' : undefined
@@ -1990,6 +2265,73 @@ function createResendWorkerHarness(
   return { db, turnstileVerifier, fetchWorker, postCvRequest };
 }
 
+function adminAuthHeaders(token = adminApiToken): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`
+  };
+}
+
+function seedCvRequest(
+  db: FakeD1Database,
+  index: number,
+  overrides: Partial<InsertedCvRequest> & { eventTypes?: string[] } = {}
+): InsertedCvRequest {
+  const createdAt = overrides.createdAt ?? new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+  const request: InsertedCvRequest = {
+    id: overrides.id ?? `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    fullName: overrides.fullName ?? `Private Requester ${index}`,
+    requesterEmail: overrides.requesterEmail ?? `requester${index}@example.com`,
+    company: overrides.company ?? `Private Company ${index}`,
+    profileUrl: overrides.profileUrl ?? `https://www.example.com/private/profile-${index}`,
+    requestedCvType: overrides.requestedCvType ?? validPayload.requestedCvType,
+    requestedLanguage: overrides.requestedLanguage ?? validPayload.requestedLanguage,
+    reason: overrides.reason ?? `Private request reason ${index}`,
+    status: overrides.status ?? 'pending',
+    createdAt,
+    updatedAt: overrides.updatedAt ?? createdAt
+  };
+  const eventTypes = overrides.eventTypes ?? ['request_created', 'owner_notification_sent'];
+
+  db.inserts.push(request);
+
+  eventTypes.forEach((eventType, eventIndex) => {
+    db.events.push({
+      id: `10000000-0000-4000-8000-${String(index * 100 + eventIndex).padStart(12, '0')}`,
+      requestId: request.id,
+      eventType,
+      createdAt: new Date(Date.parse(createdAt) + eventIndex).toISOString(),
+      metadataJson: null
+    });
+  });
+
+  return request;
+}
+
+function expectAdminResponseNotToLeak(
+  responseText: string,
+  privateValues: string[] = []
+): void {
+  expect(responseText).not.toContain('requesterEmail');
+  expect(responseText).not.toContain('fullName');
+  expect(responseText).not.toContain('company');
+  expect(responseText).not.toContain('profileUrl');
+  expect(responseText).not.toContain('reason');
+  expect(responseText).not.toContain('context');
+  expect(responseText).not.toContain('turnstileToken');
+  expect(responseText).not.toContain('approvalToken');
+  expect(responseText).not.toContain('APPROVAL_TOKEN_SECRET');
+  expect(responseText).not.toContain('TURNSTILE_SECRET_KEY');
+  expect(responseText).not.toContain('RESEND_API_KEY');
+  expect(responseText).not.toContain('ADMIN_API_TOKEN');
+  expect(responseText).not.toContain('payload');
+  expect(responseText).not.toContain('token=');
+  expect(responseText).not.toContain('?token');
+
+  for (const privateValue of privateValues) {
+    expect(responseText).not.toContain(privateValue);
+  }
+}
+
 function withTurnstileToken(payload: unknown): unknown {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return payload;
@@ -2013,6 +2355,14 @@ function fakeD1Result(changes: number): D1Result {
     },
     results: []
   } as unknown as D1Result;
+}
+
+function fakeD1Rows<T>(results: T[]): D1Result<T> {
+  return {
+    success: true,
+    meta: {},
+    results
+  } as unknown as D1Result<T>;
 }
 
 async function createPendingRequest({
