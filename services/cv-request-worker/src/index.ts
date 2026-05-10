@@ -3,9 +3,13 @@ import {
   verifyApprovalToken,
   type ApprovalAction
 } from './approvalTokens';
-import { ResendEmailSender, type EmailSender } from './email';
+import { ResendEmailSender, type EmailSendResult, type EmailSender } from './email';
 import { createInactiveRateLimiter, type RateLimiter } from './rateLimit';
-import { CloudflareTurnstileVerifier, type TurnstileVerifier } from './turnstile';
+import {
+  CloudflareTurnstileVerifier,
+  type TurnstileVerificationResult,
+  type TurnstileVerifier
+} from './turnstile';
 import { validateCvRequestPayload } from './validation';
 
 export interface Env {
@@ -18,6 +22,8 @@ export interface Env {
   PUBLIC_SITE_URL?: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_DEBUG?: string;
+  CV_REQUEST_DEBUG?: string;
+  CV_REQUEST_EMAIL_DEBUG?: string;
 }
 
 type JsonBody =
@@ -43,6 +49,15 @@ const securityHeaders = {
 const cvRequestsAllowedMethods = 'POST, OPTIONS';
 const cvRequestsAllowedHeaders = 'content-type';
 const preflightMaxAgeSeconds = '600';
+
+type OwnerNotificationStatus = 'sent' | 'failed';
+
+interface OwnerNotificationDebugFields {
+  ownerNotificationStatus?: OwnerNotificationStatus;
+  ownerNotificationFailureKind?: Exclude<EmailSendResult, { ok: true }>['failureKind'];
+  resendHttpStatus?: number;
+  resendErrorName?: string;
+}
 
 interface WorkerDependencies {
   emailSender?: EmailSender;
@@ -194,7 +209,7 @@ async function handleCvRequest(
     return turnstileConfigurationErrorResponse(cors);
   }
 
-  let turnstileVerification;
+  let turnstileVerification: TurnstileVerificationResult;
 
   try {
     turnstileVerification = await turnstileVerifier.verify(
@@ -205,13 +220,13 @@ async function handleCvRequest(
       env
     );
   } catch {
-    return turnstileVerificationFailedResponse(cors);
+    turnstileVerification = { ok: false, failureKind: 'siteverify_fetch_exception' };
   }
 
   if (!turnstileVerification.ok) {
     return turnstileVerificationFailedResponse(
       cors,
-      readTurnstileDebugErrorCodes(env, turnstileVerification.errorCodes)
+      readTurnstileDebugFields(env, turnstileVerification)
     );
   }
 
@@ -219,6 +234,13 @@ async function handleCvRequest(
 
   if (!validation.ok) {
     return jsonResponse({ status: 'validation_error', errors: validation.errors }, 400, cors);
+  }
+
+  if (!env.CV_REQUESTS_DB) {
+    return serviceUnavailableResponse(
+      cors,
+      readPersistenceDebugFields(env, 'missing_d1_binding')
+    );
   }
 
   const requestId = crypto.randomUUID();
@@ -255,41 +277,71 @@ async function handleCvRequest(
       )
       .run();
   } catch {
-    return jsonResponse(
-      {
-        status: 'service_unavailable',
-        message: 'The CV request service is temporarily unavailable. Try again later.'
-      },
-      503,
-      cors
+    return serviceUnavailableResponse(
+      cors,
+      readPersistenceDebugFields(env, 'd1_insert_failed')
     );
   }
+
+  let ownerNotificationStatus: OwnerNotificationStatus = 'sent';
+  let ownerNotificationResult: EmailSendResult | undefined;
 
   try {
     const actionLinks = await createOwnerActionLinks(request.url, env, requestId);
 
-    await emailSender.sendOwnerNotification(env, {
+    ownerNotificationResult = await emailSender.sendOwnerNotification(env, {
       requestId,
       payload: validation.payload,
       actionLinks
     });
+    ownerNotificationStatus = ownerNotificationResult.ok ? 'sent' : 'failed';
   } catch {
-    return acceptedCvRequestResponse(requestId, cors);
+    ownerNotificationStatus = 'failed';
   }
 
-  return acceptedCvRequestResponse(requestId, cors);
+  return acceptedCvRequestResponse(
+    requestId,
+    cors,
+    readOwnerNotificationDebugFields(env, ownerNotificationStatus, ownerNotificationResult)
+  );
 }
 
-function acceptedCvRequestResponse(requestId: string, cors?: CorsContext): Response {
-  return jsonResponse(
-    {
-      requestId,
-      status: 'pending',
-      message: 'Your CV request was received and is pending review.'
-    },
-    202,
-    cors
-  );
+function acceptedCvRequestResponse(
+  requestId: string,
+  cors?: CorsContext,
+  debugFields: OwnerNotificationDebugFields = {}
+): Response {
+  const body: {
+    requestId: string;
+    status: string;
+    message: string;
+    ownerNotificationStatus?: OwnerNotificationStatus;
+    ownerNotificationFailureKind?: Exclude<EmailSendResult, { ok: true }>['failureKind'];
+    resendHttpStatus?: number;
+    resendErrorName?: string;
+  } = {
+    requestId,
+    status: 'pending',
+    message: 'Your CV request was received and is pending review.'
+  };
+
+  if (debugFields.ownerNotificationStatus !== undefined) {
+    body.ownerNotificationStatus = debugFields.ownerNotificationStatus;
+  }
+
+  if (debugFields.ownerNotificationFailureKind !== undefined) {
+    body.ownerNotificationFailureKind = debugFields.ownerNotificationFailureKind;
+  }
+
+  if (debugFields.resendHttpStatus !== undefined) {
+    body.resendHttpStatus = debugFields.resendHttpStatus;
+  }
+
+  if (debugFields.resendErrorName !== undefined) {
+    body.resendErrorName = debugFields.resendErrorName;
+  }
+
+  return jsonResponse(body, 202, cors);
 }
 
 interface ApprovalRoute {
@@ -386,7 +438,7 @@ async function handleApprovalAction(
   }
 
   try {
-    await emailSender.sendRequesterDecisionNotification(env, {
+    const requesterNotificationResult = await emailSender.sendRequesterDecisionNotification(env, {
       requestId: existingRequest.id,
       requesterName: existingRequest.fullName,
       requesterEmail: existingRequest.requesterEmail,
@@ -394,6 +446,10 @@ async function handleApprovalAction(
       requestedLanguage: existingRequest.requestedLanguage,
       decision: nextStatus
     });
+
+    if (!requesterNotificationResult.ok) {
+      return requesterNotificationFailedResponse(nextStatus);
+    }
   } catch {
     return requesterNotificationFailedResponse(nextStatus);
   }
@@ -491,14 +547,30 @@ function alreadyFinalizedResponse(): Response {
   );
 }
 
-function serviceUnavailableResponse(): Response {
-  return jsonResponse(
-    {
-      status: 'service_unavailable',
-      message: 'The CV request service is temporarily unavailable. Try again later.'
-    },
-    503
-  );
+type PersistenceFailureKind = 'missing_d1_binding' | 'd1_insert_failed';
+
+interface PersistenceFailureDebugFields {
+  persistenceFailureKind?: PersistenceFailureKind;
+}
+
+function serviceUnavailableResponse(
+  cors?: CorsContext,
+  debugFields: PersistenceFailureDebugFields = {}
+): Response {
+  const body: {
+    status: string;
+    message: string;
+    persistenceFailureKind?: PersistenceFailureKind;
+  } = {
+    status: 'service_unavailable',
+    message: 'The CV request service is temporarily unavailable. Try again later.'
+  };
+
+  if (debugFields.persistenceFailureKind !== undefined) {
+    body.persistenceFailureKind = debugFields.persistenceFailureKind;
+  }
+
+  return jsonResponse(body, 503, cors);
 }
 
 function requesterNotificationFailedResponse(status: 'approved' | 'rejected'): Response {
@@ -563,21 +635,41 @@ function turnstileConfigurationErrorResponse(cors?: CorsContext): Response {
   );
 }
 
+type TurnstileVerificationFailureResult = Extract<TurnstileVerificationResult, { ok: false }>;
+
+type TurnstileFailureKind = TurnstileVerificationFailureResult['failureKind'];
+
+interface TurnstileFailureDebugFields {
+  siteverifyHttpStatus?: number;
+  turnstileErrorCodes?: string[];
+  turnstileFailureKind?: TurnstileFailureKind;
+}
+
 function turnstileVerificationFailedResponse(
   cors?: CorsContext,
-  errorCodes?: string[]
+  debugFields: TurnstileFailureDebugFields = {}
 ): Response {
   const body: {
     status: string;
     message: string;
-    errorCodes?: string[];
+    siteverifyHttpStatus?: number;
+    turnstileErrorCodes?: string[];
+    turnstileFailureKind?: TurnstileFailureKind;
   } = {
     status: 'turnstile_verification_failed',
     message: 'The anti-spam check failed. Try again.'
   };
 
-  if (errorCodes) {
-    body.errorCodes = errorCodes;
+  if (debugFields.siteverifyHttpStatus !== undefined) {
+    body.siteverifyHttpStatus = debugFields.siteverifyHttpStatus;
+  }
+
+  if (debugFields.turnstileErrorCodes !== undefined) {
+    body.turnstileErrorCodes = debugFields.turnstileErrorCodes;
+  }
+
+  if (debugFields.turnstileFailureKind !== undefined) {
+    body.turnstileFailureKind = debugFields.turnstileFailureKind;
   }
 
   return jsonResponse(body, 403, cors);
@@ -621,11 +713,67 @@ function readTurnstileToken(body: unknown): string | undefined {
   return trimmedToken ? trimmedToken : undefined;
 }
 
-function readTurnstileDebugErrorCodes(
+function readTurnstileDebugFields(
   env: Env,
-  errorCodes: string[] | undefined
-): string[] | undefined {
-  return env.TURNSTILE_DEBUG === 'true' ? (errorCodes ?? []) : undefined;
+  result: TurnstileVerificationFailureResult
+): TurnstileFailureDebugFields {
+  if (env.TURNSTILE_DEBUG !== 'true') {
+    return {};
+  }
+
+  if (result.failureKind === 'siteverify_failed') {
+    return {
+      turnstileFailureKind: result.failureKind,
+      turnstileErrorCodes: result.errorCodes,
+      siteverifyHttpStatus: result.httpStatus
+    };
+  }
+
+  if (result.failureKind === 'siteverify_http_error') {
+    return {
+      turnstileFailureKind: result.failureKind,
+      siteverifyHttpStatus: result.httpStatus
+    };
+  }
+
+  return {
+    turnstileFailureKind: result.failureKind
+  };
+}
+
+function readPersistenceDebugFields(
+  env: Env,
+  failureKind: PersistenceFailureKind
+): PersistenceFailureDebugFields {
+  return env.CV_REQUEST_DEBUG === 'true' ? { persistenceFailureKind: failureKind } : {};
+}
+
+function readOwnerNotificationDebugFields(
+  env: Env,
+  status: OwnerNotificationStatus,
+  result: EmailSendResult | undefined
+): OwnerNotificationDebugFields {
+  if (env.CV_REQUEST_EMAIL_DEBUG !== 'true') {
+    return {};
+  }
+
+  const debugFields: OwnerNotificationDebugFields = {
+    ownerNotificationStatus: status
+  };
+
+  if (status === 'failed' && result && !result.ok) {
+    debugFields.ownerNotificationFailureKind = result.failureKind;
+
+    if ('httpStatus' in result && result.httpStatus !== undefined) {
+      debugFields.resendHttpStatus = result.httpStatus;
+    }
+
+    if (result.failureKind === 'resend_http_error' && result.errorName !== undefined) {
+      debugFields.resendErrorName = result.errorName;
+    }
+  }
+
+  return debugFields;
 }
 
 function readCfConnectingIp(request: Request): string | undefined {

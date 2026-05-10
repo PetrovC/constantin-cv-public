@@ -29,18 +29,55 @@ export interface RequesterDecisionEmail {
   decision: RequesterDecision;
 }
 
+export type EmailSendFailureKind =
+  | 'resend_fetch_exception'
+  | 'resend_http_error'
+  | 'resend_invalid_json'
+  | 'resend_unexpected_response';
+
+export type EmailSendResult =
+  | {
+      ok: true;
+    }
+  | {
+      ok: false;
+      failureKind: 'resend_fetch_exception';
+    }
+  | {
+      ok: false;
+      failureKind: 'resend_http_error';
+      httpStatus?: number;
+      errorName?: string;
+    }
+  | {
+      ok: false;
+      failureKind: 'resend_invalid_json';
+      httpStatus?: number;
+    }
+  | {
+      ok: false;
+      failureKind: 'resend_unexpected_response';
+      httpStatus?: number;
+    };
+
 export interface EmailSender {
-  sendOwnerNotification(env: EmailEnv, notification: OwnerNotificationEmail): Promise<void>;
+  sendOwnerNotification(
+    env: EmailEnv,
+    notification: OwnerNotificationEmail
+  ): Promise<EmailSendResult>;
   sendRequesterDecisionNotification(
     env: EmailEnv,
     notification: RequesterDecisionEmail
-  ): Promise<void>;
+  ): Promise<EmailSendResult>;
 }
 
 export class ResendEmailSender implements EmailSender {
   constructor(private readonly fetcher: typeof fetch = fetch) {}
 
-  async sendOwnerNotification(env: EmailEnv, notification: OwnerNotificationEmail): Promise<void> {
+  async sendOwnerNotification(
+    env: EmailEnv,
+    notification: OwnerNotificationEmail
+  ): Promise<EmailSendResult> {
     const apiKey = readRequiredConfig(env.RESEND_API_KEY, 'RESEND_API_KEY');
     const to = readRequiredConfig(env.OWNER_NOTIFICATION_EMAIL, 'OWNER_NOTIFICATION_EMAIL');
     const from = readRequiredConfig(
@@ -48,56 +85,92 @@ export class ResendEmailSender implements EmailSender {
       'OWNER_NOTIFICATION_FROM_EMAIL'
     );
 
-    const response = await this.fetcher('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        from,
-        to,
-        subject: `New CV request ${notification.requestId}`,
-        text: buildOwnerNotificationText(notification, env.PUBLIC_SITE_URL)
-      })
+    return sendResendEmail(this.fetcher, apiKey, {
+      from,
+      to,
+      subject: `New CV request ${notification.requestId}`,
+      text: buildOwnerNotificationText(notification, env.PUBLIC_SITE_URL)
     });
-
-    if (!response.ok) {
-      throw new Error(`Resend email request failed with status ${response.status}.`);
-    }
   }
 
   async sendRequesterDecisionNotification(
     env: EmailEnv,
     notification: RequesterDecisionEmail
-  ): Promise<void> {
+  ): Promise<EmailSendResult> {
     const apiKey = readRequiredConfig(env.RESEND_API_KEY, 'RESEND_API_KEY');
     const from = readRequiredConfig(
       env.OWNER_NOTIFICATION_FROM_EMAIL,
       'OWNER_NOTIFICATION_FROM_EMAIL'
     );
 
-    const response = await this.fetcher('https://api.resend.com/emails', {
+    return sendResendEmail(this.fetcher, apiKey, {
+      from,
+      to: notification.requesterEmail,
+      subject:
+        notification.decision === 'approved'
+          ? 'Your CV request was approved'
+          : 'Your CV request update',
+      text: buildRequesterDecisionText(notification)
+    });
+  }
+}
+
+interface ResendEmailRequest {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}
+
+async function sendResendEmail(
+  fetcher: typeof fetch,
+  apiKey: string,
+  email: ResendEmailRequest
+): Promise<EmailSendResult> {
+  let response: Response;
+
+  try {
+    response = await fetcher('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({
-        from,
-        to: notification.requesterEmail,
-        subject:
-          notification.decision === 'approved'
-            ? 'Your CV request was approved'
-            : 'Your CV request update',
-        text: buildRequesterDecisionText(notification)
-      })
+      body: JSON.stringify(email)
     });
-
-    if (!response.ok) {
-      throw new Error(`Resend email request failed with status ${response.status}.`);
-    }
+  } catch {
+    return { ok: false, failureKind: 'resend_fetch_exception' };
   }
+
+  if (response.ok) {
+    return { ok: true };
+  }
+
+  return readResendFailureResult(response);
+}
+
+async function readResendFailureResult(response: Response): Promise<EmailSendResult> {
+  const httpStatus = response.status;
+  let parsedBody: unknown;
+
+  try {
+    parsedBody = await response.json();
+  } catch {
+    return { ok: false, failureKind: 'resend_invalid_json', httpStatus };
+  }
+
+  if (!isRecord(parsedBody)) {
+    return { ok: false, failureKind: 'resend_unexpected_response', httpStatus };
+  }
+
+  const errorName = readSafeResendErrorName(parsedBody);
+
+  return {
+    ok: false,
+    failureKind: 'resend_http_error',
+    httpStatus,
+    ...(errorName ? { errorName } : {})
+  };
 }
 
 function buildOwnerNotificationText(
@@ -167,4 +240,21 @@ function readRequiredConfig(value: string | undefined, name: string): string {
 function readOptionalConfig(value: string | undefined): string | undefined {
   const trimmedValue = value?.trim();
   return trimmedValue ? trimmedValue : undefined;
+}
+
+function readSafeResendErrorName(body: Record<string, unknown>): string | undefined {
+  for (const field of ['name', 'type', 'code']) {
+    const value = body[field];
+    const trimmedValue = typeof value === 'string' ? value.trim() : '';
+
+    if (/^[A-Za-z0-9._:-]{1,120}$/u.test(trimmedValue)) {
+      return trimmedValue;
+    }
+  }
+
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

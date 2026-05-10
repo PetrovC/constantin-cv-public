@@ -7,13 +7,29 @@ export interface TurnstileVerificationInput {
   remoteIp?: string;
 }
 
+type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
+
 export type TurnstileVerificationResult =
   | {
       ok: true;
     }
   | {
       ok: false;
-      errorCodes?: string[];
+      failureKind: 'siteverify_failed';
+      errorCodes: string[];
+      httpStatus: number;
+    }
+  | {
+      ok: false;
+      failureKind: 'siteverify_http_error';
+      httpStatus: number;
+    }
+  | {
+      ok: false;
+      failureKind:
+        | 'siteverify_fetch_exception'
+        | 'siteverify_invalid_json'
+        | 'siteverify_unexpected_response';
     };
 
 export interface TurnstileVerifier<TEnv extends TurnstileEnv = TurnstileEnv> {
@@ -23,44 +39,77 @@ export interface TurnstileVerifier<TEnv extends TurnstileEnv = TurnstileEnv> {
 export class CloudflareTurnstileVerifier<TEnv extends TurnstileEnv = TurnstileEnv>
   implements TurnstileVerifier<TEnv>
 {
-  constructor(private readonly fetcher: typeof fetch = fetch) {}
+  constructor(private readonly fetcher: Fetcher = globalThis.fetch.bind(globalThis)) {}
 
   async verify(
     input: TurnstileVerificationInput,
     env: TEnv
   ): Promise<TurnstileVerificationResult> {
     const secret = readRequiredSecret(env.TURNSTILE_SECRET_KEY);
-    const form = new URLSearchParams();
-
-    form.set('secret', secret);
-    form.set('response', input.token);
+    const requestBody: {
+      secret: string;
+      response: string;
+      remoteip?: string;
+    } = {
+      secret,
+      response: input.token
+    };
 
     if (input.remoteIp) {
-      form.set('remoteip', input.remoteIp);
+      requestBody.remoteip = input.remoteIp;
     }
 
-    const response = await this.fetcher(
-      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded'
-        },
-        body: form
-      }
-    );
+    let response: Response;
 
-    if (!response.ok) {
-      return { ok: false };
+    try {
+      const fetcher = this.fetcher;
+
+      response = await fetcher(
+        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        }
+      );
+    } catch {
+      return { ok: false, failureKind: 'siteverify_fetch_exception' };
     }
 
-    const body = await response.json();
+    let responseBody: unknown;
 
-    if (!isSiteverifyResponse(body)) {
-      return { ok: false };
+    try {
+      responseBody = await response.json();
+    } catch {
+      return response.ok
+        ? { ok: false, failureKind: 'siteverify_invalid_json' }
+        : {
+            ok: false,
+            failureKind: 'siteverify_http_error',
+            httpStatus: response.status
+          };
     }
 
-    return body.success ? { ok: true } : { ok: false, errorCodes: body['error-codes'] };
+    if (!isSiteverifyResponse(responseBody)) {
+      return response.ok
+        ? { ok: false, failureKind: 'siteverify_unexpected_response' }
+        : {
+            ok: false,
+            failureKind: 'siteverify_http_error',
+            httpStatus: response.status
+          };
+    }
+
+    return responseBody.success
+      ? { ok: true }
+      : {
+          ok: false,
+          failureKind: 'siteverify_failed',
+          errorCodes: responseBody['error-codes'] ?? [],
+          httpStatus: response.status
+        };
   }
 }
 
