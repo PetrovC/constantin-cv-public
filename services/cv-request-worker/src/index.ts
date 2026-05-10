@@ -21,6 +21,7 @@ export interface Env {
   APPROVAL_TOKEN_SECRET: string;
   PUBLIC_SITE_URL?: string;
   TURNSTILE_SECRET_KEY?: string;
+  ADMIN_API_TOKEN?: string;
   TURNSTILE_DEBUG?: string;
   CV_REQUEST_DEBUG?: string;
   CV_REQUEST_EMAIL_DEBUG?: string;
@@ -61,6 +62,9 @@ const securityHeaders = {
 const cvRequestsAllowedMethods = 'POST, OPTIONS';
 const cvRequestsAllowedHeaders = 'content-type';
 const preflightMaxAgeSeconds = '600';
+const adminRecentCvRequestsPath = '/api/admin/cv-requests/recent';
+const defaultAdminRecentRequestsLimit = 20;
+const maxAdminRecentRequestsLimit = 50;
 
 type OwnerNotificationStatus = 'sent' | 'failed';
 
@@ -120,8 +124,16 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
         return handleCvRequest(request, env, emailSender, rateLimiter, turnstileVerifier, cors);
       }
 
+      if (request.method === 'GET' && url.pathname === adminRecentCvRequestsPath) {
+        return handleAdminRecentCvRequests(request, url, env);
+      }
+
       if (request.method === 'GET' && approvalRoute) {
         return handleApprovalAction(request, url, env, approvalRoute, emailSender);
+      }
+
+      if (url.pathname === adminRecentCvRequestsPath) {
+        return methodNotAllowedResponse(url.pathname);
       }
 
       if (url.pathname === '/health' || url.pathname === '/api/cv-requests' || approvalRoute) {
@@ -397,6 +409,185 @@ interface CvRequestDecisionRow {
   requesterEmail: string;
   requestedCvType: 'one-page' | 'full-dev';
   requestedLanguage: 'fr' | 'en' | 'de';
+}
+
+interface AdminRecentCvRequestRow {
+  requestId: string;
+  status: string;
+  requestedCvType: string;
+  requestedLanguage: string;
+  createdAt: string;
+  updatedAt: string;
+  eventType: string | null;
+}
+
+interface AdminRecentCvRequestSummary {
+  requestId: string;
+  status: string;
+  requestedCvType: string;
+  requestedLanguage: string;
+  createdAt: string;
+  updatedAt: string;
+  eventTypes: string[];
+}
+
+async function handleAdminRecentCvRequests(
+  request: Request,
+  url: URL,
+  env: Env
+): Promise<Response> {
+  const configuredToken = env.ADMIN_API_TOKEN?.trim();
+
+  if (!configuredToken) {
+    return adminConfigurationErrorResponse();
+  }
+
+  const submittedToken = readBearerToken(request.headers.get('authorization'));
+
+  if (submittedToken === undefined) {
+    return adminUnauthorizedResponse();
+  }
+
+  if (!constantTimeishEqual(submittedToken, configuredToken)) {
+    return adminForbiddenResponse();
+  }
+
+  const limit = readAdminRecentRequestsLimit(url.searchParams.get('limit'));
+
+  if (!limit.ok) {
+    return jsonResponse(
+      {
+        status: 'validation_error',
+        message: 'Use a positive integer limit no greater than 50.'
+      },
+      400
+    );
+  }
+
+  if (!env.CV_REQUESTS_DB) {
+    return adminServiceUnavailableResponse();
+  }
+
+  let rows: AdminRecentCvRequestRow[];
+
+  try {
+    const result = await env.CV_REQUESTS_DB.prepare(
+      `SELECT
+        r.id AS requestId,
+        r.status AS status,
+        r.requestedCvType AS requestedCvType,
+        r.requestedLanguage AS requestedLanguage,
+        r.createdAt AS createdAt,
+        r.updatedAt AS updatedAt,
+        e.eventType AS eventType
+       FROM (
+        SELECT id, status, requestedCvType, requestedLanguage, createdAt, updatedAt
+        FROM cv_requests
+        ORDER BY createdAt DESC
+        LIMIT ?
+       ) r
+       LEFT JOIN cv_request_events e ON e.requestId = r.id
+       ORDER BY r.createdAt DESC, e.createdAt ASC`
+    )
+      .bind(limit.value)
+      .all<AdminRecentCvRequestRow>();
+
+    rows = Array.isArray(result.results) ? result.results : [];
+  } catch {
+    return adminServiceUnavailableResponse();
+  }
+
+  return jsonResponse(
+    {
+      status: 'ok',
+      limit: limit.value,
+      requests: summarizeAdminRecentCvRequests(rows)
+    },
+    200
+  );
+}
+
+function summarizeAdminRecentCvRequests(
+  rows: AdminRecentCvRequestRow[]
+): AdminRecentCvRequestSummary[] {
+  const summaries: AdminRecentCvRequestSummary[] = [];
+  const summariesByRequestId = new Map<string, AdminRecentCvRequestSummary>();
+
+  for (const row of rows) {
+    let summary = summariesByRequestId.get(row.requestId);
+
+    if (!summary) {
+      summary = {
+        requestId: row.requestId,
+        status: row.status,
+        requestedCvType: row.requestedCvType,
+        requestedLanguage: row.requestedLanguage,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        eventTypes: []
+      };
+      summariesByRequestId.set(row.requestId, summary);
+      summaries.push(summary);
+    }
+
+    if (row.eventType) {
+      summary.eventTypes.push(row.eventType);
+    }
+  }
+
+  return summaries;
+}
+
+function readAdminRecentRequestsLimit(
+  rawLimit: string | null
+): { ok: true; value: number } | { ok: false } {
+  if (rawLimit === null) {
+    return { ok: true, value: defaultAdminRecentRequestsLimit };
+  }
+
+  const trimmedLimit = rawLimit.trim();
+
+  if (!/^[1-9][0-9]*$/u.test(trimmedLimit)) {
+    return { ok: false };
+  }
+
+  const parsedLimit = Number(trimmedLimit);
+
+  if (!Number.isSafeInteger(parsedLimit)) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    value: Math.min(parsedLimit, maxAdminRecentRequestsLimit)
+  };
+}
+
+function readBearerToken(authorizationHeader: string | null): string | undefined {
+  const authorization = authorizationHeader?.trim();
+
+  if (!authorization) {
+    return undefined;
+  }
+
+  const match = /^Bearer\s+(.+)$/iu.exec(authorization);
+  const token = match?.[1]?.trim();
+
+  return token ? token : undefined;
+}
+
+function constantTimeishEqual(left: string, right: string): boolean {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  let diff = leftBytes.length ^ rightBytes.length;
+
+  for (let index = 0; index < length; index += 1) {
+    diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+
+  return diff === 0;
 }
 
 async function handleApprovalAction(
@@ -822,6 +1013,48 @@ function serviceUnavailableResponse(
   }
 
   return jsonResponse(body, 503, cors);
+}
+
+function adminConfigurationErrorResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'configuration_error',
+      message: 'The admin CV request service is not configured right now.'
+    },
+    503
+  );
+}
+
+function adminUnauthorizedResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'unauthorized',
+      message: 'Admin authorization is required.'
+    },
+    401,
+    undefined,
+    { 'www-authenticate': 'Bearer' }
+  );
+}
+
+function adminForbiddenResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'forbidden',
+      message: 'Admin authorization was rejected.'
+    },
+    403
+  );
+}
+
+function adminServiceUnavailableResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'service_unavailable',
+      message: 'The admin CV request service is temporarily unavailable. Try again later.'
+    },
+    503
+  );
 }
 
 function decisionServiceUnavailableResponse(responseFormat: DecisionResponseFormat): Response {

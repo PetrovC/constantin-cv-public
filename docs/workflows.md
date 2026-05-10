@@ -157,7 +157,64 @@ OWNER_NOTIFICATION_FROM_EMAIL
 APPROVAL_TOKEN_SECRET
 TURNSTILE_SECRET_KEY
 PUBLIC_SITE_URL
+ADMIN_API_TOKEN
 ```
+
+The Worker exposes a protected operational endpoint for inspecting recent
+request summaries:
+
+```txt
+GET /api/admin/cv-requests/recent
+```
+
+It requires `Authorization: Bearer <ADMIN_API_TOKEN>` and returns only safe
+request metadata: request id, status, requested CV type, requested language,
+timestamps, and recent audit event types. It does not return requester email,
+full name, company, profile URL, reason/context, tokens, secrets, raw Resend
+responses, raw exception messages, PDFs, attachments, or download links. The
+endpoint is intended for PowerShell/curl/API clients, not public browser use.
+
+For local Wrangler development, put your local token in:
+
+```txt
+services/cv-request-worker/.dev.vars
+```
+
+Example local entry:
+
+```txt
+ADMIN_API_TOKEN=replace-with-a-long-random-local-token
+```
+
+`services/cv-request-worker/.dev.vars` is ignored and must never be committed.
+For remote Cloudflare Workers, configure the secret interactively:
+
+```powershell
+npm exec --workspace services/cv-request-worker -- wrangler secret put ADMIN_API_TOKEN
+```
+
+Call the local endpoint from PowerShell:
+
+```powershell
+$AdminToken = "replace-with-your-local-token"
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "http://127.0.0.1:8787/api/admin/cv-requests/recent?limit=20" `
+  -Headers @{ Authorization = "Bearer $AdminToken" }
+```
+
+Call the deployed endpoint by replacing the URI with the Worker origin:
+
+```powershell
+$AdminToken = "replace-with-your-remote-token"
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "https://cv-request-worker.example.workers.dev/api/admin/cv-requests/recent?limit=20" `
+  -Headers @{ Authorization = "Bearer $AdminToken" }
+```
+
+`ADMIN_API_TOKEN` is a secret. Do not commit it to source files, examples,
+generated artifacts, docs, shell history snippets, issue comments, or logs.
 
 If `TURNSTILE_SECRET_KEY` is missing, `POST /api/cv-requests` rejects
 submissions with a safe `503` configuration response before persistence or
