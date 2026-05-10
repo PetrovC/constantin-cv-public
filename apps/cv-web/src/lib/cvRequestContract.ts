@@ -24,7 +24,11 @@ export interface CvRequestPayload {
   reason: string;
 }
 
-export type CvRequestField = keyof CvRequestPayload;
+export interface CvRequestSubmissionPayload extends CvRequestPayload {
+  turnstileToken: string;
+}
+
+export type CvRequestField = keyof CvRequestSubmissionPayload | 'body';
 
 export type CvRequestValidationErrorCode =
   | 'required'
@@ -32,7 +36,9 @@ export type CvRequestValidationErrorCode =
   | 'invalid_email'
   | 'invalid_url'
   | 'unsupported_cv_type'
-  | 'unsupported_language';
+  | 'unsupported_language'
+  | 'invalid_json'
+  | 'invalid_payload';
 
 export interface CvRequestValidationIssue {
   field: CvRequestField;
@@ -41,7 +47,7 @@ export interface CvRequestValidationIssue {
 }
 
 export interface CvRequestSuccessResponse {
-  status: 'accepted';
+  status: 'pending';
   requestId: string;
   message: string;
 }
@@ -58,7 +64,12 @@ export interface CvRequestRateLimitedResponse {
 }
 
 export interface CvRequestServerErrorResponse {
-  status: 'server_error';
+  status: 'configuration_error' | 'service_unavailable' | 'server_error';
+  message: string;
+}
+
+export interface CvRequestTurnstileErrorResponse {
+  status: 'turnstile_verification_failed';
   message: string;
 }
 
@@ -66,4 +77,5 @@ export type CvRequestApiResponse =
   | CvRequestSuccessResponse
   | CvRequestValidationErrorResponse
   | CvRequestRateLimitedResponse
-  | CvRequestServerErrorResponse;
+  | CvRequestServerErrorResponse
+  | CvRequestTurnstileErrorResponse;

@@ -51,6 +51,25 @@ Because the site uses the GitHub Pages base path, local URLs may include:
 http://localhost:4321/constantin-cv-public/fr/
 ```
 
+To test or build the public CV request form, configure the public-safe frontend
+values in the Astro app environment. Start from:
+
+```txt
+apps/cv-web/.env.example
+```
+
+Use placeholders only in committed examples:
+
+```txt
+PUBLIC_CV_REQUEST_API_BASE_URL=https://cv-request-worker.example.workers.dev
+PUBLIC_TURNSTILE_SITE_KEY=your-public-turnstile-site-key
+```
+
+`PUBLIC_CV_REQUEST_API_BASE_URL` points to the Cloudflare Worker origin.
+`PUBLIC_TURNSTILE_SITE_KEY` is the public Turnstile site key rendered by the
+static site. The Turnstile secret key must stay only in the Worker environment
+as `TURNSTILE_SECRET_KEY`.
+
 ## Local CV request Worker development
 
 The CV request API scaffold lives under:

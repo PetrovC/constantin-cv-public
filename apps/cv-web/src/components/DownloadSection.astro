@@ -1,5 +1,6 @@
 ---
 import type { SupportedLanguage } from '../lib/cvData';
+import { cvRequestMaxLengths } from '../lib/cvRequestContract';
 import { uiText } from '../lib/localization';
 
 interface Props {
@@ -9,6 +10,26 @@ interface Props {
 const { lang } = Astro.props as Props;
 const text = uiText[lang];
 const request = text.cvRequest;
+const apiBaseUrl = import.meta.env.PUBLIC_CV_REQUEST_API_BASE_URL?.trim() ?? '';
+const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? '';
+const isCvRequestConfigured = Boolean(apiBaseUrl && turnstileSiteKey);
+const cvRequestMessages = {
+  submittingLabel: request.submittingLabel,
+  successTitle: request.successTitle,
+  successMessage: request.successMessage,
+  validationTitle: request.validationTitle,
+  validationMessage: request.validationMessage,
+  antiSpamRequiredTitle: request.antiSpamRequiredTitle,
+  antiSpamRequiredMessage: request.antiSpamRequiredMessage,
+  antiSpamFailureTitle: request.antiSpamFailureTitle,
+  antiSpamFailureMessage: request.antiSpamFailureMessage,
+  temporaryErrorTitle: request.temporaryErrorTitle,
+  temporaryErrorMessage: request.temporaryErrorMessage,
+  configurationTitle: request.configurationTitle,
+  configurationMessage: request.configurationMessage,
+  validationFieldLabels: request.validationFieldLabels,
+  validationErrorMessages: request.validationErrorMessages
+};
 const cvTypeOptions = [
   { value: 'one-page', label: request.cvTypeOptions.onePage },
   { value: 'full-dev', label: request.cvTypeOptions.fullDeveloper }
@@ -28,90 +49,564 @@ const languageOptions = [
     <p id={`cv-request-privacy-${lang}`}>{request.privacy}</p>
   </div>
 
-  <form class="cv-request-form" data-cv-request-form aria-describedby={`cv-request-privacy-${lang} cv-request-status-${lang}`}>
+  <form
+    class="cv-request-form"
+    data-cv-request-form
+    data-cv-request-api-base-url={apiBaseUrl}
+    data-cv-request-configured={isCvRequestConfigured ? 'true' : 'false'}
+    data-cv-request-messages={JSON.stringify(cvRequestMessages)}
+    aria-describedby={`cv-request-privacy-${lang} cv-request-status-${lang}`}
+  >
     <div class="cv-request-form__grid">
       <div class="cv-request-field">
         <label for={`cv-request-full-name-${lang}`}>{request.fullNameLabel}</label>
-        <input id={`cv-request-full-name-${lang}`} type="text" autocomplete="name" required />
+        <input
+          id={`cv-request-full-name-${lang}`}
+          name="fullName"
+          type="text"
+          autocomplete="name"
+          maxlength={cvRequestMaxLengths.fullName}
+          required
+        />
       </div>
 
       <div class="cv-request-field">
         <label for={`cv-request-email-${lang}`}>{request.emailLabel}</label>
-        <input id={`cv-request-email-${lang}`} type="email" autocomplete="email" inputmode="email" required />
+        <input
+          id={`cv-request-email-${lang}`}
+          name="requesterEmail"
+          type="email"
+          autocomplete="email"
+          inputmode="email"
+          maxlength={cvRequestMaxLengths.requesterEmail}
+          required
+        />
       </div>
 
       <div class="cv-request-field">
         <label for={`cv-request-organization-${lang}`}>{request.organizationLabel}</label>
-        <input id={`cv-request-organization-${lang}`} type="text" autocomplete="organization" required />
+        <input
+          id={`cv-request-organization-${lang}`}
+          name="company"
+          type="text"
+          autocomplete="organization"
+          maxlength={cvRequestMaxLengths.company}
+          required
+        />
       </div>
 
       <div class="cv-request-field">
         <label for={`cv-request-profile-url-${lang}`}>{request.profileUrlLabel}</label>
-        <input id={`cv-request-profile-url-${lang}`} type="url" autocomplete="url" inputmode="url" required />
+        <input
+          id={`cv-request-profile-url-${lang}`}
+          name="profileUrl"
+          type="url"
+          autocomplete="url"
+          inputmode="url"
+          maxlength={cvRequestMaxLengths.profileUrl}
+        />
       </div>
 
       <div class="cv-request-field">
         <label for={`cv-request-type-${lang}`}>{request.cvTypeLabel}</label>
-        <select id={`cv-request-type-${lang}`} required>
+        <select id={`cv-request-type-${lang}`} name="requestedCvType" required>
           {cvTypeOptions.map((option) => <option value={option.value}>{option.label}</option>)}
         </select>
       </div>
 
       <div class="cv-request-field">
         <label for={`cv-request-language-${lang}`}>{request.languageLabel}</label>
-        <select id={`cv-request-language-${lang}`} required>
+        <select id={`cv-request-language-${lang}`} name="requestedLanguage" required>
           {languageOptions.map((option) => <option value={option.value} selected={option.value === lang}>{option.label}</option>)}
         </select>
       </div>
 
       <div class="cv-request-field cv-request-field--wide">
         <label for={`cv-request-reason-${lang}`}>{request.reasonLabel}</label>
-        <textarea id={`cv-request-reason-${lang}`} rows="5" placeholder={request.reasonPlaceholder} required></textarea>
+        <textarea
+          id={`cv-request-reason-${lang}`}
+          name="reason"
+          rows="5"
+          maxlength={cvRequestMaxLengths.reason}
+          placeholder={request.reasonPlaceholder}
+          required
+        ></textarea>
       </div>
     </div>
 
+    <div class="cv-request-turnstile" role="group" aria-label={request.turnstileLabel}>
+      <input type="hidden" name="turnstileToken" data-cv-request-turnstile-token />
+      {
+        turnstileSiteKey ? (
+          <div data-cv-request-turnstile data-sitekey={turnstileSiteKey}></div>
+        ) : (
+          <p>{request.configurationMessage}</p>
+        )
+      }
+    </div>
+
     <div class="cv-request-form__actions">
-      <button class="button button--primary" type="button" data-cv-request-submit>{request.submitLabel}</button>
-      <p
+      <button class="button button--primary" type="submit" disabled={!isCvRequestConfigured} data-cv-request-submit>
+        {request.submitLabel}
+      </button>
+      <div
         id={`cv-request-status-${lang}`}
-        class="cv-request-form__status"
+        class:list={['cv-request-form__status', { 'is-error': !isCvRequestConfigured }]}
         role="status"
         aria-live="polite"
         tabindex="-1"
-        hidden
+        hidden={isCvRequestConfigured}
         data-cv-request-message
       >
-        <strong>{request.unavailableTitle}</strong>
-        <span>{request.unavailableMessage}</span>
-      </p>
+        <strong data-cv-request-message-title>{isCvRequestConfigured ? '' : request.configurationTitle}</strong>
+        <span data-cv-request-message-body>{isCvRequestConfigured ? '' : request.configurationMessage}</span>
+        <ul data-cv-request-message-list hidden></ul>
+      </div>
     </div>
   </form>
 </section>
 
 <script>
-  for (const form of document.querySelectorAll('[data-cv-request-form]')) {
-    const submitButton = form.querySelector('[data-cv-request-submit]');
-    const statusMessage = form.querySelector('[data-cv-request-message]');
+  type StatusKind = 'success' | 'error' | 'info';
 
-    const showUnavailableMessage = () => {
-      if (!(form instanceof HTMLFormElement) || !(statusMessage instanceof HTMLElement)) {
-        return;
+  interface CvRequestValidationIssue {
+    field?: string;
+    code?: string;
+    message?: string;
+  }
+
+  interface CvRequestMessages {
+    submittingLabel: string;
+    successTitle: string;
+    successMessage: string;
+    validationTitle: string;
+    validationMessage: string;
+    antiSpamRequiredTitle: string;
+    antiSpamRequiredMessage: string;
+    antiSpamFailureTitle: string;
+    antiSpamFailureMessage: string;
+    temporaryErrorTitle: string;
+    temporaryErrorMessage: string;
+    configurationTitle: string;
+    configurationMessage: string;
+    validationFieldLabels: Record<string, string>;
+    validationErrorMessages: Record<string, string>;
+  }
+
+  interface TurnstileApi {
+    render: (
+      container: HTMLElement,
+      options: {
+        sitekey: string;
+        theme: 'light' | 'dark' | 'auto';
+        size: 'normal' | 'compact' | 'flexible';
+        callback: (token: string) => void;
+        'expired-callback': () => void;
+        'error-callback': () => void;
       }
+    ) => string;
+    reset: (widgetId?: string) => void;
+  }
 
-      if (!form.reportValidity()) {
-        return;
+  interface CvRequestWindow extends Window {
+    turnstile?: TurnstileApi;
+    cvRequestTurnstileReady?: () => void;
+  }
+
+  const turnstileScriptUrl =
+    'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=cvRequestTurnstileReady';
+  let turnstileLoader: Promise<TurnstileApi> | undefined;
+
+  for (const form of document.querySelectorAll<HTMLFormElement>('[data-cv-request-form]')) {
+    setupCvRequestForm(form);
+  }
+
+  function setupCvRequestForm(form: HTMLFormElement): void {
+    const messages = readMessages(form);
+    const submitButton = form.querySelector<HTMLButtonElement>('[data-cv-request-submit]');
+    const statusMessage = form.querySelector<HTMLElement>('[data-cv-request-message]');
+    const turnstileContainer = form.querySelector<HTMLElement>('[data-cv-request-turnstile]');
+    const turnstileTokenInput = form.querySelector<HTMLInputElement>(
+      '[data-cv-request-turnstile-token]'
+    );
+    const apiBaseUrl = form.dataset.cvRequestApiBaseUrl?.trim() ?? '';
+    const siteKey = turnstileContainer?.dataset.sitekey?.trim() ?? '';
+    const isConfigured = form.dataset.cvRequestConfigured === 'true' && Boolean(apiBaseUrl && siteKey);
+
+    if (!submitButton || !statusMessage || !turnstileTokenInput || !isConfigured) {
+      submitButton?.setAttribute('disabled', '');
+      if (statusMessage) {
+        showStatus(
+          statusMessage,
+          'error',
+          messages.configurationTitle,
+          messages.configurationMessage
+        );
       }
+      return;
+    }
 
-      form.reset();
-      statusMessage.hidden = false;
-      statusMessage.focus({ preventScroll: true });
-    };
+    const defaultSubmitLabel = submitButton.textContent?.trim() ?? '';
+
+    if (turnstileContainer) {
+      loadTurnstile()
+        .then((turnstile) => {
+          const widgetId = turnstile.render(turnstileContainer, {
+            sitekey: siteKey,
+            theme: 'light',
+            size: 'flexible',
+            callback: (token) => {
+              turnstileTokenInput.value = token;
+              turnstileContainer.removeAttribute('aria-invalid');
+            },
+            'expired-callback': () => {
+              turnstileTokenInput.value = '';
+            },
+            'error-callback': () => {
+              turnstileTokenInput.value = '';
+            }
+          });
+
+          form.dataset.cvRequestTurnstileWidgetId = widgetId;
+        })
+        .catch(() => {
+          submitButton.disabled = true;
+          showStatus(
+            statusMessage,
+            'error',
+            messages.temporaryErrorTitle,
+            messages.temporaryErrorMessage
+          );
+        });
+    }
 
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      showUnavailableMessage();
+      void submitCvRequestForm(
+        form,
+        apiBaseUrl,
+        submitButton,
+        defaultSubmitLabel,
+        statusMessage,
+        turnstileContainer,
+        turnstileTokenInput,
+        messages
+      );
+    });
+  }
+
+  async function submitCvRequestForm(
+    form: HTMLFormElement,
+    apiBaseUrl: string,
+    submitButton: HTMLButtonElement,
+    defaultSubmitLabel: string,
+    statusMessage: HTMLElement,
+    turnstileContainer: HTMLElement | null,
+    turnstileTokenInput: HTMLInputElement,
+    messages: CvRequestMessages
+  ): Promise<void> {
+    clearValidationState(form, turnstileContainer);
+
+    if (!form.reportValidity()) {
+      return;
+    }
+
+    const turnstileToken = turnstileTokenInput.value.trim();
+
+    if (!turnstileToken) {
+      turnstileContainer?.setAttribute('aria-invalid', 'true');
+      showStatus(
+        statusMessage,
+        'error',
+        messages.antiSpamRequiredTitle,
+        messages.antiSpamRequiredMessage
+      );
+      resetTurnstile(form, turnstileTokenInput);
+      return;
+    }
+
+    setLoading(form, submitButton, true, defaultSubmitLabel, messages);
+
+    try {
+      const response = await fetch(`${apiBaseUrl.replace(/\/+$/u, '')}/api/cv-requests`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(readPayload(form, turnstileToken))
+      });
+      const responseBody = await readJsonResponse(response);
+
+      if (response.status === 202) {
+        showStatus(statusMessage, 'success', messages.successTitle, messages.successMessage);
+        form.reset();
+        turnstileTokenInput.value = '';
+        resetTurnstile(form, turnstileTokenInput);
+        return;
+      }
+
+      if (response.status === 400) {
+        const issues = readValidationIssues(responseBody);
+        const details = issues.map((issue) => formatValidationIssue(issue, messages));
+
+        applyValidationIssues(form, turnstileContainer, issues, messages);
+        showStatus(
+          statusMessage,
+          'error',
+          messages.validationTitle,
+          messages.validationMessage,
+          details
+        );
+        resetTurnstile(form, turnstileTokenInput);
+        return;
+      }
+
+      if (response.status === 403) {
+        showStatus(
+          statusMessage,
+          'error',
+          messages.antiSpamFailureTitle,
+          messages.antiSpamFailureMessage
+        );
+        resetTurnstile(form, turnstileTokenInput);
+        return;
+      }
+
+      showStatus(
+        statusMessage,
+        'error',
+        messages.temporaryErrorTitle,
+        messages.temporaryErrorMessage
+      );
+      resetTurnstile(form, turnstileTokenInput);
+    } catch {
+      showStatus(
+        statusMessage,
+        'error',
+        messages.temporaryErrorTitle,
+        messages.temporaryErrorMessage
+      );
+      resetTurnstile(form, turnstileTokenInput);
+    } finally {
+      setLoading(form, submitButton, false, defaultSubmitLabel, messages);
+    }
+  }
+
+  function readPayload(form: HTMLFormElement, turnstileToken: string): Record<string, string> {
+    const formData = new FormData(form);
+    const profileUrl = readFormValue(formData, 'profileUrl');
+    const payload: Record<string, string> = {
+      fullName: readFormValue(formData, 'fullName'),
+      requesterEmail: readFormValue(formData, 'requesterEmail'),
+      company: readFormValue(formData, 'company'),
+      requestedCvType: readFormValue(formData, 'requestedCvType'),
+      requestedLanguage: readFormValue(formData, 'requestedLanguage'),
+      reason: readFormValue(formData, 'reason'),
+      turnstileToken
+    };
+
+    if (profileUrl) {
+      payload.profileUrl = profileUrl;
+    }
+
+    return payload;
+  }
+
+  function readFormValue(formData: FormData, name: string): string {
+    const value = formData.get(name);
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  async function readJsonResponse(response: Response): Promise<unknown> {
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      return undefined;
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      return undefined;
+    }
+  }
+
+  function readValidationIssues(responseBody: unknown): CvRequestValidationIssue[] {
+    if (!isObject(responseBody) || !Array.isArray(responseBody.errors)) {
+      return [];
+    }
+
+    return responseBody.errors.filter(isObject).map((error) => ({
+      field: typeof error.field === 'string' ? error.field : undefined,
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined
+    }));
+  }
+
+  function applyValidationIssues(
+    form: HTMLFormElement,
+    turnstileContainer: HTMLElement | null,
+    issues: CvRequestValidationIssue[],
+    messages: CvRequestMessages
+  ): void {
+    for (const issue of issues) {
+      if (!issue.field || issue.field === 'body') {
+        continue;
+      }
+
+      if (issue.field === 'turnstileToken') {
+        turnstileContainer?.setAttribute('aria-invalid', 'true');
+        continue;
+      }
+
+      const field = form.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        `[name="${CSS.escape(issue.field)}"]`
+      );
+
+      if (field) {
+        field.setCustomValidity(formatValidationIssue(issue, messages));
+        field.setAttribute('aria-invalid', 'true');
+      }
+    }
+  }
+
+  function clearValidationState(
+    form: HTMLFormElement,
+    turnstileContainer: HTMLElement | null
+  ): void {
+    for (const field of form.querySelectorAll<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >('input, select, textarea')) {
+      field.setCustomValidity('');
+      field.removeAttribute('aria-invalid');
+    }
+
+    turnstileContainer?.removeAttribute('aria-invalid');
+  }
+
+  function formatValidationIssue(
+    issue: CvRequestValidationIssue,
+    messages: CvRequestMessages
+  ): string {
+    const field = issue.field ? messages.validationFieldLabels[issue.field] : undefined;
+    const problem = issue.code
+      ? messages.validationErrorMessages[issue.code] ?? issue.message
+      : issue.message;
+
+    if (field && problem) {
+      return `${field}: ${problem}`;
+    }
+
+    return problem ?? messages.validationMessage;
+  }
+
+  function showStatus(
+    statusMessage: HTMLElement,
+    kind: StatusKind,
+    title: string,
+    message: string,
+    details: string[] = []
+  ): void {
+    const titleElement = statusMessage.querySelector<HTMLElement>(
+      '[data-cv-request-message-title]'
+    );
+    const bodyElement = statusMessage.querySelector<HTMLElement>('[data-cv-request-message-body]');
+    const listElement = statusMessage.querySelector<HTMLUListElement>(
+      '[data-cv-request-message-list]'
+    );
+
+    statusMessage.hidden = false;
+    statusMessage.classList.toggle('is-success', kind === 'success');
+    statusMessage.classList.toggle('is-error', kind === 'error');
+    statusMessage.classList.toggle('is-info', kind === 'info');
+
+    if (titleElement) {
+      titleElement.textContent = title;
+    }
+
+    if (bodyElement) {
+      bodyElement.textContent = message;
+    }
+
+    if (listElement) {
+      listElement.replaceChildren(
+        ...details.map((detail) => {
+          const item = document.createElement('li');
+          item.textContent = detail;
+          return item;
+        })
+      );
+      listElement.hidden = details.length === 0;
+    }
+
+    statusMessage.focus({ preventScroll: true });
+  }
+
+  function setLoading(
+    form: HTMLFormElement,
+    submitButton: HTMLButtonElement,
+    isLoading: boolean,
+    defaultSubmitLabel: string,
+    messages: CvRequestMessages
+  ): void {
+    form.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+    submitButton.disabled = isLoading;
+    submitButton.textContent = isLoading ? messages.submittingLabel : defaultSubmitLabel;
+  }
+
+  function resetTurnstile(form: HTMLFormElement, turnstileTokenInput: HTMLInputElement): void {
+    const turnstile = (window as CvRequestWindow).turnstile;
+    const widgetId = form.dataset.cvRequestTurnstileWidgetId;
+
+    turnstileTokenInput.value = '';
+
+    if (!turnstile || !widgetId) {
+      return;
+    }
+
+    try {
+      turnstile.reset(widgetId);
+    } catch {
+      turnstile.reset();
+    }
+  }
+
+  function loadTurnstile(): Promise<TurnstileApi> {
+    const cvRequestWindow = window as CvRequestWindow;
+
+    if (cvRequestWindow.turnstile) {
+      return Promise.resolve(cvRequestWindow.turnstile);
+    }
+
+    if (turnstileLoader) {
+      return turnstileLoader;
+    }
+
+    turnstileLoader = new Promise((resolve, reject) => {
+      cvRequestWindow.cvRequestTurnstileReady = () => {
+        if (cvRequestWindow.turnstile) {
+          resolve(cvRequestWindow.turnstile);
+          return;
+        }
+
+        reject(new Error('Turnstile did not load.'));
+      };
+
+      const script = document.createElement('script');
+      script.src = turnstileScriptUrl;
+      script.async = true;
+      script.defer = true;
+      script.dataset.cvRequestTurnstileScript = 'true';
+      script.onerror = () => reject(new Error('Turnstile script failed to load.'));
+      document.head.append(script);
     });
 
-    submitButton?.addEventListener('click', showUnavailableMessage);
+    return turnstileLoader;
+  }
+
+  function readMessages(form: HTMLFormElement): CvRequestMessages {
+    return JSON.parse(form.dataset.cvRequestMessages ?? '{}') as CvRequestMessages;
+  }
+
+  function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 </script>

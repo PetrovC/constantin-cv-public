@@ -49,13 +49,13 @@ export const uiText = {
       kicker: 'CV sur demande',
       title: 'Demander mon CV',
       intro:
-        'Les CV professionnels sont disponibles sur demande. Chaque demande sera examinee avant envoi lorsque le workflow sera actif.',
+        'Les CV professionnels sont disponibles sur demande. Chaque demande est examinee avant tout envoi.',
       privacy:
-        'Cela evite de publier directement en ligne des documents prives ou des versions destinees a un echange approuve.',
+        'Le formulaire transmet uniquement les informations necessaires au workflow de demande. Aucun CV prive ni lien PDF n est publie.',
       fullNameLabel: 'Nom complet',
       emailLabel: 'Email professionnel',
       organizationLabel: 'Entreprise / organisation',
-      profileUrlLabel: 'URL LinkedIn ou site web',
+      profileUrlLabel: 'URL LinkedIn ou site web (optionnel)',
       cvTypeLabel: 'Type de CV demande',
       cvTypeOptions: {
         onePage: 'CV une page',
@@ -69,10 +69,47 @@ export const uiText = {
       },
       reasonLabel: 'Raison / contexte de la demande',
       reasonPlaceholder: 'Recrutement, mission potentielle, entretien technique...',
-      submitLabel: 'Verifier la disponibilite',
-      unavailableTitle: 'Workflow bientot disponible',
-      unavailableMessage:
-        'La demande de CV n est pas encore active. Aucune donnee n a ete envoyee ni conservee.'
+      turnstileLabel: 'Verification anti-spam',
+      submitLabel: 'Envoyer la demande',
+      submittingLabel: 'Envoi en cours...',
+      successTitle: 'Demande recue',
+      successMessage:
+        'Merci. La demande a ete transmise et sera examinee avant tout envoi.',
+      validationTitle: 'Informations a corriger',
+      validationMessage: 'Verifiez les champs indiques puis renvoyez la demande.',
+      antiSpamRequiredTitle: 'Verification requise',
+      antiSpamRequiredMessage:
+        'Completez la verification anti-spam avant d envoyer la demande.',
+      antiSpamFailureTitle: 'Verification anti-spam echouee',
+      antiSpamFailureMessage:
+        'La verification anti-spam a echoue. Rechargez la verification puis reessayez.',
+      temporaryErrorTitle: 'Service temporairement indisponible',
+      temporaryErrorMessage:
+        'La demande n a pas pu etre traitee maintenant. Reessayez plus tard.',
+      configurationTitle: 'Formulaire non configure',
+      configurationMessage:
+        'La demande de CV n est pas disponible sur cette version du site.',
+      validationFieldLabels: {
+        fullName: 'Nom complet',
+        requesterEmail: 'Email professionnel',
+        company: 'Entreprise / organisation',
+        profileUrl: 'URL LinkedIn ou site web',
+        requestedCvType: 'Type de CV demande',
+        requestedLanguage: 'Langue demandee',
+        reason: 'Raison / contexte',
+        turnstileToken: 'Verification anti-spam',
+        body: 'Requete'
+      },
+      validationErrorMessages: {
+        required: 'champ requis',
+        too_long: 'champ trop long',
+        invalid_email: 'adresse email invalide',
+        invalid_url: 'URL HTTPS invalide',
+        unsupported_cv_type: 'type de CV non pris en charge',
+        unsupported_language: 'langue non prise en charge',
+        invalid_json: 'requete JSON invalide',
+        invalid_payload: 'format de demande invalide'
+      }
     },
     contactTitle: 'Contact',
     contactAction: 'Me contacter',
@@ -131,13 +168,13 @@ export const uiText = {
       kicker: 'CV on request',
       title: 'Request my CV',
       intro:
-        'Professional CVs are available on request. Each request will be reviewed before anything is sent once the workflow is active.',
+        'Professional CVs are available on request. Each request is reviewed before anything is sent.',
       privacy:
-        'This avoids publishing private documents or approved-exchange versions directly online.',
+        'The form sends only the details needed for the request workflow. No private CV or PDF link is published.',
       fullNameLabel: 'Full name',
       emailLabel: 'Professional email',
       organizationLabel: 'Company / organization',
-      profileUrlLabel: 'LinkedIn or website URL',
+      profileUrlLabel: 'LinkedIn or website URL (optional)',
       cvTypeLabel: 'Requested CV type',
       cvTypeOptions: {
         onePage: 'One-page CV',
@@ -151,10 +188,46 @@ export const uiText = {
       },
       reasonLabel: 'Reason / context of request',
       reasonPlaceholder: 'Recruiting, potential mission, technical interview...',
-      submitLabel: 'Check availability',
-      unavailableTitle: 'Workflow coming soon',
-      unavailableMessage:
-        'The CV request workflow is not active yet. No data has been sent or stored.'
+      turnstileLabel: 'Anti-spam verification',
+      submitLabel: 'Send request',
+      submittingLabel: 'Sending...',
+      successTitle: 'Request received',
+      successMessage:
+        'Thank you. The request was sent and will be reviewed before anything is shared.',
+      validationTitle: 'Information to correct',
+      validationMessage: 'Check the listed fields and send the request again.',
+      antiSpamRequiredTitle: 'Verification required',
+      antiSpamRequiredMessage: 'Complete the anti-spam verification before sending the request.',
+      antiSpamFailureTitle: 'Anti-spam verification failed',
+      antiSpamFailureMessage:
+        'The anti-spam verification failed. Reload the verification and try again.',
+      temporaryErrorTitle: 'Service temporarily unavailable',
+      temporaryErrorMessage:
+        'The request could not be processed right now. Please try again later.',
+      configurationTitle: 'Form not configured',
+      configurationMessage:
+        'CV requests are not available in this version of the site.',
+      validationFieldLabels: {
+        fullName: 'Full name',
+        requesterEmail: 'Professional email',
+        company: 'Company / organization',
+        profileUrl: 'LinkedIn or website URL',
+        requestedCvType: 'Requested CV type',
+        requestedLanguage: 'Requested language',
+        reason: 'Reason / context',
+        turnstileToken: 'Anti-spam verification',
+        body: 'Request'
+      },
+      validationErrorMessages: {
+        required: 'required field',
+        too_long: 'field is too long',
+        invalid_email: 'invalid email address',
+        invalid_url: 'invalid HTTPS URL',
+        unsupported_cv_type: 'unsupported CV type',
+        unsupported_language: 'unsupported language',
+        invalid_json: 'invalid JSON request',
+        invalid_payload: 'invalid request format'
+      }
     },
     contactTitle: 'Contact',
     contactAction: 'Contact me',
@@ -213,13 +286,13 @@ export const uiText = {
       kicker: 'CV auf Anfrage',
       title: 'CV anfragen',
       intro:
-        'Professionelle CVs sind auf Anfrage verfuegbar. Jede Anfrage wird geprueft, bevor etwas gesendet wird, sobald der Workflow aktiv ist.',
+        'Professionelle CVs sind auf Anfrage verfuegbar. Jede Anfrage wird vor einem Versand geprueft.',
       privacy:
-        'So werden private Dokumente oder Versionen fuer freigegebene Austausche nicht direkt online veroeffentlicht.',
+        'Das Formular sendet nur die fuer den Anfrageworkflow notwendigen Angaben. Kein privater CV und kein PDF-Link wird veroeffentlicht.',
       fullNameLabel: 'Vollstaendiger Name',
       emailLabel: 'Berufliche E-Mail',
       organizationLabel: 'Unternehmen / Organisation',
-      profileUrlLabel: 'LinkedIn- oder Website-URL',
+      profileUrlLabel: 'LinkedIn- oder Website-URL (optional)',
       cvTypeLabel: 'Gewuenschter CV-Typ',
       cvTypeOptions: {
         onePage: 'Einseitiger CV',
@@ -233,10 +306,47 @@ export const uiText = {
       },
       reasonLabel: 'Grund / Kontext der Anfrage',
       reasonPlaceholder: 'Recruiting, moegliche Mission, technisches Gespraech...',
-      submitLabel: 'Verfuegbarkeit pruefen',
-      unavailableTitle: 'Workflow bald verfuegbar',
-      unavailableMessage:
-        'Der CV-Anfrageworkflow ist noch nicht aktiv. Es wurden keine Daten gesendet oder gespeichert.'
+      turnstileLabel: 'Anti-Spam-Verifikation',
+      submitLabel: 'Anfrage senden',
+      submittingLabel: 'Wird gesendet...',
+      successTitle: 'Anfrage erhalten',
+      successMessage:
+        'Danke. Die Anfrage wurde gesendet und wird vor einem Versand geprueft.',
+      validationTitle: 'Angaben korrigieren',
+      validationMessage: 'Pruefen Sie die genannten Felder und senden Sie die Anfrage erneut.',
+      antiSpamRequiredTitle: 'Verifikation erforderlich',
+      antiSpamRequiredMessage:
+        'Schliessen Sie die Anti-Spam-Verifikation ab, bevor Sie die Anfrage senden.',
+      antiSpamFailureTitle: 'Anti-Spam-Verifikation fehlgeschlagen',
+      antiSpamFailureMessage:
+        'Die Anti-Spam-Verifikation ist fehlgeschlagen. Laden Sie die Verifikation neu und versuchen Sie es erneut.',
+      temporaryErrorTitle: 'Service voruebergehend nicht verfuegbar',
+      temporaryErrorMessage:
+        'Die Anfrage konnte jetzt nicht verarbeitet werden. Bitte versuchen Sie es spaeter erneut.',
+      configurationTitle: 'Formular nicht konfiguriert',
+      configurationMessage:
+        'CV-Anfragen sind in dieser Version der Website nicht verfuegbar.',
+      validationFieldLabels: {
+        fullName: 'Vollstaendiger Name',
+        requesterEmail: 'Berufliche E-Mail',
+        company: 'Unternehmen / Organisation',
+        profileUrl: 'LinkedIn- oder Website-URL',
+        requestedCvType: 'Gewuenschter CV-Typ',
+        requestedLanguage: 'Gewuenschte Sprache',
+        reason: 'Grund / Kontext',
+        turnstileToken: 'Anti-Spam-Verifikation',
+        body: 'Anfrage'
+      },
+      validationErrorMessages: {
+        required: 'Pflichtfeld',
+        too_long: 'Feld ist zu lang',
+        invalid_email: 'ungueltige E-Mail-Adresse',
+        invalid_url: 'ungueltige HTTPS-URL',
+        unsupported_cv_type: 'nicht unterstuetzter CV-Typ',
+        unsupported_language: 'nicht unterstuetzte Sprache',
+        invalid_json: 'ungueltige JSON-Anfrage',
+        invalid_payload: 'ungueltiges Anfrageformat'
+      }
     },
     contactTitle: 'Kontakt',
     contactAction: 'Kontakt aufnehmen',
@@ -310,9 +420,44 @@ interface LocalizedCvRequest {
   languageOptions: Record<SupportedLanguage, string>;
   reasonLabel: string;
   reasonPlaceholder: string;
+  turnstileLabel: string;
   submitLabel: string;
-  unavailableTitle: string;
-  unavailableMessage: string;
+  submittingLabel: string;
+  successTitle: string;
+  successMessage: string;
+  validationTitle: string;
+  validationMessage: string;
+  antiSpamRequiredTitle: string;
+  antiSpamRequiredMessage: string;
+  antiSpamFailureTitle: string;
+  antiSpamFailureMessage: string;
+  temporaryErrorTitle: string;
+  temporaryErrorMessage: string;
+  configurationTitle: string;
+  configurationMessage: string;
+  validationFieldLabels: Record<
+    | 'fullName'
+    | 'requesterEmail'
+    | 'company'
+    | 'profileUrl'
+    | 'requestedCvType'
+    | 'requestedLanguage'
+    | 'reason'
+    | 'turnstileToken'
+    | 'body',
+    string
+  >;
+  validationErrorMessages: Record<
+    | 'required'
+    | 'too_long'
+    | 'invalid_email'
+    | 'invalid_url'
+    | 'unsupported_cv_type'
+    | 'unsupported_language'
+    | 'invalid_json'
+    | 'invalid_payload',
+    string
+  >;
 }
 
 export function formatPeriod(period: GeneratedCvPeriod, language: SupportedLanguage): string {

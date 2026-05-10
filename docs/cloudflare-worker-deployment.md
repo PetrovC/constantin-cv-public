@@ -1,21 +1,24 @@
 # Cloudflare Worker deployment
 
 This document prepares manual deployment for the CV request API Worker. It does
-not connect the public portfolio form, deploy anything automatically, deliver
-PDFs, or add private data to the repository.
+not deploy anything automatically, deliver PDFs, or add private data to the
+repository.
 
 ## Safety rules
 
 - Keep `services/cv-request-worker/wrangler.toml` public-safe.
 - Do not commit a real `account_id`.
 - Do not commit a real D1 `database_id`.
-- Do not commit Worker secrets, API keys, Turnstile keys, private email
+- Do not commit Worker secrets, API keys, Turnstile secret keys, private email
   addresses, private CV files, generated print data, or generated PDFs.
+- Keep production frontend values deployment-specific. The Turnstile site key
+  is public-safe, but committed examples must use placeholders only.
 - Keep CI limited to validation. CI must not run `npm run api:deploy`,
   `npm run api:migrate:remote`, or `wrangler deploy` until a separate deployment
   workflow is intentionally designed.
-- The public form remains disconnected from this API until active rate limiting
-  and final production configuration are reviewed.
+- The public form is wired to this API through Astro `PUBLIC_` environment
+  variables. Review active rate limiting and final production configuration
+  before promoting the connected form as production protection.
 
 The committed `wrangler.toml` uses empty non-secret vars and an all-zero D1 id as
 placeholders:
@@ -101,10 +104,11 @@ npm run api:deploy
 
 Create a Turnstile site in Cloudflare for the public portfolio origin.
 
-- The frontend will later use the Turnstile site key.
+- The frontend uses `PUBLIC_TURNSTILE_SITE_KEY` to render the Turnstile widget.
 - The Worker uses the Turnstile secret key through `TURNSTILE_SECRET_KEY`.
-- Do not commit either key.
-- Do not connect the frontend form in this deployment-preparation step.
+- Do not commit the secret key.
+- Use `PUBLIC_CV_REQUEST_API_BASE_URL` in the Astro app to point the static form
+  at the deployed Worker origin.
 
 `POST /api/cv-requests` requires a `turnstileToken`. Without
 `TURNSTILE_SECRET_KEY`, the Worker returns a safe `503` configuration response.
