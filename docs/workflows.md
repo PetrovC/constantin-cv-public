@@ -174,6 +174,18 @@ full name, company, profile URL, reason/context, tokens, secrets, raw Resend
 responses, raw exception messages, PDFs, attachments, or download links. The
 endpoint is intended for PowerShell/curl/API clients, not public browser use.
 
+Prefer the local admin scripts for routine inspection. They prompt for
+`ADMIN_API_TOKEN` securely and print only the safe summary fields and event type
+names returned by the admin endpoint:
+
+```powershell
+.\scripts\admin\get-cv-requests.ps1
+.\scripts\admin\get-cv-requests.ps1 -ApiBase "http://127.0.0.1:8787" -Limit 20 -ShowEvents
+.\scripts\admin\get-cv-request-events.ps1 -Limit 20
+```
+
+See `docs/admin-scripts.md` for setup, examples, and troubleshooting.
+
 For local Wrangler development, put your local token in:
 
 ```txt
@@ -191,26 +203,6 @@ For remote Cloudflare Workers, configure the secret interactively:
 
 ```powershell
 npm exec --workspace services/cv-request-worker -- wrangler secret put ADMIN_API_TOKEN
-```
-
-Call the local endpoint from PowerShell:
-
-```powershell
-$AdminToken = "replace-with-your-local-token"
-Invoke-RestMethod `
-  -Method Get `
-  -Uri "http://127.0.0.1:8787/api/admin/cv-requests/recent?limit=20" `
-  -Headers @{ Authorization = "Bearer $AdminToken" }
-```
-
-Call the deployed endpoint by replacing the URI with the Worker origin:
-
-```powershell
-$AdminToken = "replace-with-your-remote-token"
-Invoke-RestMethod `
-  -Method Get `
-  -Uri "https://cv-request-worker.example.workers.dev/api/admin/cv-requests/recent?limit=20" `
-  -Headers @{ Authorization = "Bearer $AdminToken" }
 ```
 
 `ADMIN_API_TOKEN` is a secret. Do not commit it to source files, examples,
