@@ -9,7 +9,7 @@ const astroPrerenderEntrypoint = require.resolve('astro/entrypoints/prerender');
 const publicBasePath = '/constantin-cv-public';
 
 export default defineConfig({
-  site: 'https://petrovc.github.io',
+  site: 'https://www.capetrov.net',
   base: isPrintBuild ? undefined : publicBasePath,
   integrations: [vue()],
   outDir: isPrintBuild ? './dist-print' : './dist',
