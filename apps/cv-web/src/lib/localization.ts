@@ -49,9 +49,11 @@ export const uiText = {
       kicker: 'CV sur demande',
       title: 'Demander mon CV',
       intro:
-        'Les CV professionnels sont disponibles sur demande. Chaque demande est examinee avant tout envoi.',
+        'Vous etes sur le site CV/portfolio officiel de Constantin Petrov. Ce formulaire sert uniquement aux demandes professionnelles de CV; chaque demande est examinee manuellement avant toute suite.',
       privacy:
-        'Le formulaire transmet uniquement les informations necessaires au workflow de demande. Aucun CV prive ni lien PDF n est publie.',
+        'Les informations envoyees restent limitees au traitement de la demande. Aucun CV prive ni lien de telechargement prive direct n est expose publiquement.',
+      trustNote:
+        'Note de confiance: aucune demande de mot de passe, paiement, information bancaire, piece d identite ou identifiant sensible. Ce site ne propose aucun telechargement executable.',
       fullNameLabel: 'Nom complet',
       emailLabel: 'Email professionnel',
       organizationLabel: 'Entreprise / organisation',
@@ -168,9 +170,11 @@ export const uiText = {
       kicker: 'CV on request',
       title: 'Request my CV',
       intro:
-        'Professional CVs are available on request. Each request is reviewed before anything is sent.',
+        'You are on the official CV and portfolio site of Constantin Petrov. This form is only for professional CV requests; each request is manually reviewed before any follow-up.',
       privacy:
-        'The form sends only the details needed for the request workflow. No private CV or PDF link is published.',
+        'Submitted details are limited to handling the request. No private CV file or direct private download link is exposed publicly.',
+      trustNote:
+        'Trust note: no password, payment, banking information, identity document, or sensitive credentials are ever requested here. This site offers no executable download.',
       fullNameLabel: 'Full name',
       emailLabel: 'Professional email',
       organizationLabel: 'Company / organization',
@@ -286,9 +290,11 @@ export const uiText = {
       kicker: 'CV auf Anfrage',
       title: 'CV anfragen',
       intro:
-        'Professionelle CVs sind auf Anfrage verfuegbar. Jede Anfrage wird vor einem Versand geprueft.',
+        'Sie sind auf der offiziellen CV- und Portfolio-Website von Constantin Petrov. Dieses Formular ist nur fuer berufliche CV-Anfragen gedacht; jede Anfrage wird vor jeder Rueckmeldung manuell geprueft.',
       privacy:
-        'Das Formular sendet nur die fuer den Anfrageworkflow notwendigen Angaben. Kein privater CV und kein PDF-Link wird veroeffentlicht.',
+        'Gesendete Angaben bleiben auf die Bearbeitung der Anfrage beschraenkt. Kein privater CV und kein direkter privater Download-Link wird oeffentlich bereitgestellt.',
+      trustNote:
+        'Vertrauenshinweis: Hier werden niemals Passwort, Zahlung, Bankdaten, Ausweisdokumente oder sensible Zugangsdaten angefragt. Diese Website bietet keinen Download ausfuehrbarer Dateien an.',
       fullNameLabel: 'Vollstaendiger Name',
       emailLabel: 'Berufliche E-Mail',
       organizationLabel: 'Unternehmen / Organisation',
@@ -407,6 +413,7 @@ interface LocalizedCvRequest {
   title: string;
   intro: string;
   privacy: string;
+  trustNote: string;
   fullNameLabel: string;
   emailLabel: string;
   organizationLabel: string;
