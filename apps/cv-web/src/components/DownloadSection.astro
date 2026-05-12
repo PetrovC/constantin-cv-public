@@ -55,8 +55,12 @@ const languageOptions = [
     data-cv-request-api-base-url={apiBaseUrl}
     data-cv-request-configured={isCvRequestConfigured ? 'true' : 'false'}
     data-cv-request-messages={JSON.stringify(cvRequestMessages)}
-    aria-describedby={`cv-request-privacy-${lang} cv-request-status-${lang}`}
+    aria-describedby={`cv-request-privacy-${lang} cv-request-trust-note-${lang} cv-request-status-${lang}`}
   >
+    <p id={`cv-request-trust-note-${lang}`} class="cv-request-form__trust-note">
+      {request.trustNote}
+    </p>
+
     <div class="cv-request-form__grid">
       <div class="cv-request-field">
         <label for={`cv-request-full-name-${lang}`}>{request.fullNameLabel}</label>

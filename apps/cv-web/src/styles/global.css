@@ -880,6 +880,17 @@ h4 {
   box-shadow: 0 16px 32px rgba(23, 32, 51, 0.1);
 }
 
+.cv-request-form > .cv-request-form__trust-note {
+  margin: 0;
+  border: 1px solid rgba(31, 120, 105, 0.2);
+  border-radius: 8px;
+  padding: 0.8rem 0.9rem;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.93rem;
+  line-height: 1.55;
+}
+
 .cv-request-form__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
