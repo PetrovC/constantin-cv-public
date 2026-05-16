@@ -102,6 +102,21 @@ public sealed class CvValidationServiceTests
     }
 
     [Fact]
+    public void Validate_WhenExperienceHasNoVisibilityBlock_ThenFailsClosed()
+    {
+        var experience = CvDocumentFactory.ValidMinimal().Experiences[0];
+        var document = CvDocumentFactory.ValidMinimal() with
+        {
+            Experiences = [experience with { Visibility = null }]
+        };
+
+        var result = service.Validate(document);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Path == "experiences[0].visibility");
+    }
+
+    [Fact]
     public void MissingMissionBulletsFail()
     {
         var experience = CvDocumentFactory.ValidMinimal().Experiences[0];

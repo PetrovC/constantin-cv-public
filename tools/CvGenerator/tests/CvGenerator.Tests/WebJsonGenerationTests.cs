@@ -80,6 +80,19 @@ public sealed class WebJsonGenerationTests
     }
 
     [Fact]
+    public async Task Generate_WhenProducingPublicJson_ThenVisibilityFlagsAreNotExposed()
+    {
+        await using var tempFolder = TemporaryFolder.Create();
+        var result = new WebJsonGenerationService().Generate(CvDocumentFactory.ValidMinimal());
+
+        await new FileWebJsonArtifactWriter().WriteAsync(tempFolder.Path, result.Artifacts);
+        var rawJson = await File.ReadAllTextAsync(
+            Path.Combine(tempFolder.Path, "web", "cv.fr.generated.json"));
+
+        Assert.DoesNotContain("visibility", rawJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Generate_WhenExperienceIsHiddenFromWebsite_ThenPublicJsonOmitsExperience()
     {
         await using var tempFolder = TemporaryFolder.Create();

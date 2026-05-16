@@ -9,7 +9,6 @@ import SkillsSection from '../../components/SkillsSection.astro';
 import SummarySection from '../../components/SummarySection.astro';
 import PageLayout from '../../layouts/PageLayout.astro';
 import {
-  getWebsiteVisibleExperiences,
   loadAllGeneratedCvDocuments,
   type GeneratedCvDocument,
   type SupportedLanguage
@@ -32,7 +31,6 @@ export async function getStaticPaths() {
 }
 
 const { cv, lang } = Astro.props as Props;
-const websiteExperiences = getWebsiteVisibleExperiences(cv.experiences);
 ---
 
 <PageLayout title={`${cv.profile.fullName} | ${cv.profile.title}`} description={cv.summary.short} lang={lang}>
@@ -42,7 +40,7 @@ const websiteExperiences = getWebsiteVisibleExperiences(cv.experiences);
     <SkillsSection skills={cv.skills} softSkills={cv.softSkills} lang={lang} />
     <LanguagesSection languages={cv.spokenLanguages} lang={lang} />
     <EducationSection education={cv.education} continuousLearning={cv.continuousLearning} lang={lang} />
-    <ExperienceSection experiences={websiteExperiences} lang={lang} />
+    <ExperienceSection experiences={cv.experiences} lang={lang} />
     <DownloadSection lang={lang} />
     <ContactSection profile={cv.profile} lang={lang} />
   </main>

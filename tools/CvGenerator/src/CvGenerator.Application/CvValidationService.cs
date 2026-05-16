@@ -267,6 +267,10 @@ public sealed class CvValidationService
     {
         if (visibility is null)
         {
+            // Required, not optional: a missing visibility block must never be
+            // treated as "publish everywhere". Public/private separation is the
+            // core guarantee of this generator.
+            Add(errors, path, "Visibility is required for every experience.");
             return;
         }
 

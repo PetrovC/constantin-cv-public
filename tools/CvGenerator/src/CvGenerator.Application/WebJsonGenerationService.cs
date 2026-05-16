@@ -136,7 +136,6 @@ public sealed class WebJsonGenerationService
             Company = experience.Company!,
             Role = Localize(experience.Role!, language),
             Period = CreateLocalizedPeriod(experience.Period!),
-            Visibility = CreateVisibility(experience.Visibility),
             Missions = experience.Missions
                 .Select(mission => CreateLocalizedMission(mission, language))
                 .ToArray()
@@ -161,14 +160,16 @@ public sealed class WebJsonGenerationService
             To = period.To!
         };
 
+    // Fail-closed: a missing flag must never publish private data on the public
+    // site. Validation already makes visibility mandatory; this is the safety net.
     private static WebCvVisibility CreateVisibility(CvVisibility? visibility)
         => new()
         {
-            Website = visibility?.Website ?? true,
-            ShortCv = visibility?.ShortCv ?? true,
-            FullDevCv = visibility?.FullDevCv ?? true,
-            FullCompleteCv = visibility?.FullCompleteCv ?? true,
-            Linkedin = visibility?.Linkedin ?? true
+            Website = visibility?.Website ?? false,
+            ShortCv = visibility?.ShortCv ?? false,
+            FullDevCv = visibility?.FullDevCv ?? false,
+            FullCompleteCv = visibility?.FullCompleteCv ?? false,
+            Linkedin = visibility?.Linkedin ?? false
         };
 
     private static string Localize(LocalizedText text, string language)
