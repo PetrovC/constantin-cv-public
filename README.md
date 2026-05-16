@@ -4,7 +4,7 @@ Multilingual CV and portfolio monorepo for Constantin Petrov.
 
 The repository keeps one structured CV source of truth in `data/cv.yml` and will use it to power:
 
-- a public Astro + Vue portfolio website;
+- a public Astro portfolio website;
 - downloadable professional CV PDFs;
 - LinkedIn-ready generated content.
 
@@ -29,15 +29,14 @@ Generated artifacts are intentionally excluded from Git. Do not manually edit fi
 
 ## Current Scope
 
-This bootstrap contains:
+The project currently includes:
 
-- initial project documentation;
-- a minimal multilingual CV YAML file;
-- a .NET generator solution skeleton;
-- an Astro website prepared for Vue components;
-- a simple portfolio landing page.
-
-PDF generation, CI/CD, external services and database storage are out of scope for this first version.
+- a multilingual CV YAML source of truth (`data/cv.yml`);
+- a .NET (Clean Architecture) generator producing public web JSON and private print JSON;
+- a multilingual Astro public website (fr/en/de) deployed to GitHub Pages;
+- Playwright-based PDF generation for private CV variants;
+- a Cloudflare Worker backend (D1 + Resend) handling CV access requests;
+- CI/CD via GitHub Actions (PR checks + Pages deploy) with a public-privacy gate.
 
 ## Useful Commands
 

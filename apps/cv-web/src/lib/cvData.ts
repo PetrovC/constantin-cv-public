@@ -67,16 +67,7 @@ export interface GeneratedCvExperience {
   company: string;
   role: string;
   period: GeneratedCvPeriod;
-  visibility?: GeneratedCvVisibility;
   missions: GeneratedCvMission[];
-}
-
-export interface GeneratedCvVisibility {
-  website: boolean;
-  shortCv: boolean;
-  fullDevCv: boolean;
-  fullCompleteCv: boolean;
-  linkedin: boolean;
 }
 
 export interface GeneratedCvPeriod {
@@ -133,18 +124,6 @@ export async function loadGeneratedCvDocument(
 
     throw error;
   }
-}
-
-/**
- * Returns the experiences that are intended for the public website.
- *
- * Experiences without an explicit visibility block are treated as visible so older
- * generated artifacts remain compatible with the website.
- */
-export function getWebsiteVisibleExperiences(
-  experiences: GeneratedCvExperience[]
-): GeneratedCvExperience[] {
-  return experiences.filter((experience) => experience.visibility?.website ?? true);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
