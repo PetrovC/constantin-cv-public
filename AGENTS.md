@@ -92,9 +92,9 @@ Do not read every file. Read only what is needed, in this order:
 
 1. This file.
 2. The current GitHub issue or task description.
-3. `docs/roadmap.md` / `docs/cv-data-model.md` when product or domain context is needed.
-4. `docs/architecture.md` (and `docs/decisions/`) when the task touches modules, boundaries, or design.
-5. `README.md` and root `package.json` scripts when build/test/lint commands are needed.
+3. `docs/ai/PROJECT.md` when product or domain context is needed.
+4. `docs/ai/ARCHITECTURE.md` when the task touches modules, boundaries, or design.
+5. `docs/ai/COMMANDS.md` when build/test/lint commands are needed.
 6. The relevant skill (see routing below).
 7. Source files directly related to the task.
 
