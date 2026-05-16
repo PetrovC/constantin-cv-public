@@ -14,6 +14,9 @@ PUBLIC_SITE_URL = "https://cv-request-worker.constantin-cv.workers.dev"
 TURNSTILE_DEBUG = "false"
 CV_REQUEST_EMAIL_DEBUG = "false"
 CV_DELIVERY_ENABLED = "true"
+# CV_DELIVERY_TOKEN_SECRET is NOT defined here on purpose: it is a signing
+# secret and must only be set via `wrangler secret put CV_DELIVERY_TOKEN_SECRET`
+# (see the secrets list below). Never commit its value.
 CV_DELIVERY_LINK_TTL_SECONDS = "604800"
 CV_DELIVERY_MANIFEST_JSON = '''
 {
@@ -31,7 +34,6 @@ CV_DELIVERY_MANIFEST_JSON = '''
   }
 }
 '''
-CV_DELIVERY_TOKEN_SECRET = "6219cfc22214f589711da1ccb54ca69132c3cb7077444017416b67a4cecc0eb9"
 
 [assets]
 directory = "../../generated/private-cv-assets"
@@ -52,7 +54,7 @@ binding = "CV_REQUESTS_DB"
 database_name = "constantin-cv-requests"
 # Replace this all-zero placeholder with the real D1 database id only in local
 # deployment config. Do not commit a real database_id.
-database_id = "e60be452-609d-40a9-974e-9e6125eb0428"
+database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [observability]
