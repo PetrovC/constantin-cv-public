@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CvGenerator.Application\CvGenerator.Application.csproj" />
     <ProjectReference Include="..\CvGenerator.Infrastructure\CvGenerator.Infrastructure.csproj" />
+    <ProjectReference Include="..\CvGenerator.Pdf\CvGenerator.Pdf.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

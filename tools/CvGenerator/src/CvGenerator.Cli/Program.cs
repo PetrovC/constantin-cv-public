@@ -1,5 +1,6 @@
 using CvGenerator.Application;
 using CvGenerator.Infrastructure;
+using CvGenerator.Pdf;
 
 return await CliProgram.RunAsync(args);
 
@@ -17,7 +18,7 @@ internal static class CliProgram
         {
             "validate" => await ValidateAsync(args),
             "generate" => await GenerateAsync(args),
-            "generate-print" => await GeneratePrintAsync(args),
+            "generate-pdf" => await GeneratePdfAsync(args),
             _ => WriteUnknownCommand(args[0])
         };
     }
@@ -99,7 +100,7 @@ internal static class CliProgram
         }
     }
 
-    private static async Task<int> GeneratePrintAsync(string[] args)
+    private static async Task<int> GeneratePdfAsync(string[] args)
     {
         var input = GetOption(args, "--input");
         if (input is null)
@@ -149,11 +150,18 @@ internal static class CliProgram
                 return 1;
             }
 
-            var printWriter = new FilePrintJsonArtifactWriter();
-            var writtenPrintFiles = await printWriter.WriteAsync(output, printGenerationResult.Artifacts);
+            var frenchArtifact = printGenerationResult.Artifacts
+                .FirstOrDefault(artifact => artifact.Language == "fr");
+            if (frenchArtifact is null)
+            {
+                Console.Error.WriteLine("Print generation did not produce the required French artifact.");
+                return 1;
+            }
 
-            Console.WriteLine($"Generated {writtenPrintFiles.Count} print JSON artifact(s) in {Path.Combine(output, "print")}");
-            foreach (var file in writtenPrintFiles)
+            var writtenPdfFiles = new CvPdfGenerator().Generate(frenchArtifact.Content, output);
+
+            Console.WriteLine($"Generated {writtenPdfFiles.Count} CV PDF(s) in {Path.Combine(output, "pdf", "fr")}");
+            foreach (var file in writtenPdfFiles)
             {
                 Console.WriteLine($"- {file}");
             }
@@ -208,6 +216,6 @@ internal static class CliProgram
         Console.WriteLine("Commands:");
         Console.WriteLine("  validate --input <path>  Validate the CV source file.");
         Console.WriteLine("  generate --input <path> --output <path>");
-        Console.WriteLine("  generate-print --input <path> --private-input <path> --output <path>");
+        Console.WriteLine("  generate-pdf --input <path> --private-input <path> --output <path>");
     }
 }

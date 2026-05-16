@@ -20,10 +20,8 @@ Private/local PDF flow:
 ```txt
 data/cv.yml
 + data/private/cv.private.yml
-  → CvGenerator print generation
-  → generated/print/*.json
-  → Astro print pages in private mode
-  → Playwright
+  → CvGenerator print generation (in-memory print model)
+  → CvGenerator.Pdf (QuestPDF)
   → generated/pdf/*
 ```
 
@@ -40,6 +38,7 @@ tools/CvGenerator/
   src/CvGenerator.Domain/
   src/CvGenerator.Application/
   src/CvGenerator.Infrastructure/
+  src/CvGenerator.Pdf/
   src/CvGenerator.Cli/
   tests/CvGenerator.Tests/
 
@@ -48,7 +47,6 @@ apps/cv-web/
 
 generated/
   web/
-  print/
   pdf/
 ```
 
@@ -67,7 +65,7 @@ Domain must not depend on:
 - filesystem;
 - Astro;
 - web components;
-- Playwright;
+- PDF rendering (QuestPDF);
 - GitHub Actions.
 
 ### Application

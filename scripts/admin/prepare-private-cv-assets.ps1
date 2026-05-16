@@ -10,7 +10,6 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).ProviderPath
 $privateOverlayPath = Join-Path $repoRoot "data/private/cv.private.yml"
 $privateGenerationCommandOrder = @(
-  "npm run cv:generate-print",
   "npm run pdf:generate",
   ".\scripts\admin\prepare-private-cv-assets.ps1"
 )

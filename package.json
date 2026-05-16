@@ -15,9 +15,8 @@
     "build:all": "npm run build && npm run pdf:generate",
     "build": "npm run cv:generate && npm run web:build",
     "cv:generate": "dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.csproj -- generate --input data/cv.yml --output generated",
-    "cv:generate-print": "dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.csproj -- generate-print --input data/cv.yml --private-input data/private/cv.private.yml --output generated",
     "dev": "npm run dev --workspace apps/cv-web",
-    "pdf:generate": "node scripts/generate-pdfs.mjs",
+    "pdf:generate": "dotnet run --project tools/CvGenerator/src/CvGenerator.Cli/CvGenerator.Cli.csproj -- generate-pdf --input data/cv.yml --private-input data/private/cv.private.yml --output generated",
     "privacy:check": "node scripts/check-public-privacy.mjs",
     "ci:check": "dotnet test tools/CvGenerator/CvGenerator.sln && npm run cv:generate && npm run build && npm run privacy:check",
     "web:build": "npm run build --workspace apps/cv-web"
@@ -25,7 +24,5 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "devDependencies": {
-    "playwright": "^1.59.1"
-  }
+  "devDependencies": {}
 }
