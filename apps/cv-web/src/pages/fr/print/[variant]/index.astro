@@ -20,26 +20,26 @@ interface Props {
   route: PrintRoute;
 }
 
-const printRoutes: PrintRoute[] = [
-  {
-    slug: 'one-page',
-    variant: 'onePage',
-    variantClass: 'print-body--compact',
-    title: (cv) => `${cv.profile.fullName} | CV une page`,
-    description: (cv) => cv.summary.short
-  },
-  {
-    slug: 'full-dev',
-    variant: 'fullDev',
-    title: (cv) => `${cv.profile.fullName} | CV developpeur fullstack`,
-    description: (cv) => cv.summary.long
-  }
-];
-
 export function getStaticPaths() {
   if (process.env.CV_WEB_BUILD_MODE !== 'print') {
     return [];
   }
+
+  const printRoutes: PrintRoute[] = [
+    {
+      slug: 'one-page',
+      variant: 'onePage',
+      variantClass: 'print-body--compact',
+      title: (cv) => `${cv.profile.fullName} | CV une page`,
+      description: (cv) => cv.summary.short
+    },
+    {
+      slug: 'full-dev',
+      variant: 'fullDev',
+      title: (cv) => `${cv.profile.fullName} | CV developpeur fullstack`,
+      description: (cv) => cv.summary.long
+    }
+  ];
 
   return printRoutes.map((route) => ({
     params: { variant: route.slug },

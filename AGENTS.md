@@ -1,137 +1,241 @@
 # AGENTS.md
 
-## Project goal
+## Role
 
-Build a public-safe multilingual CV and portfolio platform for Constantin Petrov.
+You are a software engineering agent working on this repository.
 
-The project uses one public-safe CV source of truth to generate:
+Your job: implement, refactor, review, test, and document changes while keeping
+the codebase simple, maintainable, testable, and understandable.
 
-- a static Astro + Vue portfolio website;
-- public web JSON artifacts;
-- private/local print and PDF artifacts;
-- a future CV request workflow.
+The goal is not clever code. The goal is code a new developer can understand
+and a team can safely evolve for years.
 
-## Read order
+---
 
-Always read this file first.
+## How to run Codex CLI
 
-Read additional docs only when relevant:
-
-- `docs/privacy.md` when touching public/private data, contact info, generated artifacts, PDFs, GitHub Pages or serverless workflows.
-- `docs/architecture.md` when touching the generator, data flow, domain/application/infrastructure boundaries or Astro data loading.
-- `docs/workflows.md` when touching scripts, CI, GitHub Actions, build commands or deployment.
-- `docs/codex-usage.md` when changing agent instructions or project automation behavior.
-- `docs/roadmap.md` when planning new features.
-
-## Non-negotiable privacy rules
-
-This repository is public.
-
-Tracked files must never contain:
-
-- raw personal email;
-- phone number;
-- precise home/location details;
-- private CV PDFs;
-- private reference CV files;
-- generated print JSON;
-- generated PDFs;
-- secrets or API keys.
-
-`data/cv.yml` must remain public-safe.
-
-Private contact data belongs only in:
-
-```txt
-data/private/cv.private.yml
+```bash
+codex                              # interactive, on-request approval (default)
+codex --approval-policy untrusted     # ask for anything not pre-allowlisted (most cautious)
+codex --approval-policy never         # fully autonomous; no confirmations (CI / supervised only)
 ```
 
-That file must stay ignored by Git.
+Valid `approval_policy` values: `untrusted` | `on-request` | `never` (plus a
+`granular` table for fine-grained control). `on-failure` is **deprecated** —
+use `on-request` for interactive runs or `never` for non-interactive runs.
 
-Public web JSON must never expose:
+Useful options:
+- `--profile deep` — switch to the `deep` reasoning profile (high effort, slower, more thorough).
+- `--profile readonly` — read-only sandbox; safe for exploration without any writes.
+- `--model gpt-5.5` — override the model for this session (current recommended; falls back to gpt-5.4).
+- `--no-project-doc` — skip loading project docs (faster for quick one-off tasks).
 
-- phone number;
-- raw email;
-- encoded mailto containing the real email;
-- precise private location;
-- private print routes.
+Codex reads this file at startup along with `.codex/config.toml` for project-level settings.
+Skills live in `.agents/skills/<name>/SKILL.md` and are activated via `/skills` or by typing `$` in the prompt.
 
-## Architecture boundaries
+## Configuration cascade
 
-Keep responsibilities separated:
+Codex merges AGENTS.md files from broad to narrow:
 
-- `data/cv.yml`: public-safe source of truth.
-- `data/private/cv.private.yml`: local private overlay, ignored by Git.
-- `tools/CvGenerator`: .NET validation and artifact generation.
-- `apps/cv-web`: Astro public website.
-- `generated/web`: generated public web JSON, ignored.
-- `generated/print`: generated private print JSON, ignored.
-- `generated/pdf`: generated private PDFs, ignored.
+1. `~/.codex/AGENTS.override.md` then `~/.codex/AGENTS.md` (global).
+2. Each `AGENTS.override.md` / `AGENTS.md` walking from the git repo root down to the working directory.
+3. Files closer to the working directory take precedence; total merged content is capped by `project_doc_max_bytes` (32 KiB by default).
 
-Domain models must not depend on YAML, JSON, filesystem, Astro or UI concerns.
+Use `AGENTS.override.md` for temporary or sub-directory exceptions without disturbing the main file.
 
-Application code contains use cases and mapping.
+**Reference:** [github.com/openai/codex](https://github.com/openai/codex) · [Codex AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md) · GitHub Action: [github.com/openai/codex-action](https://github.com/openai/codex-action)
 
-Infrastructure handles file reading and writing.
+---
 
-CLI only parses commands and coordinates services.
+## Lifecycle hooks
 
-Astro components render generated public data and must not contain private CV data.
+This kit ships `.codex/hooks.json` wiring three safety/QoL hooks (mirrors the
+Claude Code setup so behaviour is consistent across tools):
 
-## Validation commands
+| Event | Hook | Purpose |
+|---|---|---|
+| `PreToolUse` (Bash) | `pre-bash-guard.sh` | Blocks force-push, `git reset --hard`, `rm -rf` on absolute/home/parent paths, and unapproved SQL `DROP`. Exit 2 = blocked. |
+| `PostToolUse` (Edit/Write/Patch) | `format-on-save.sh` | Best-effort formatter (prettier/ruff/gofmt/rustfmt/dotnet) on the edited file. |
+| `Stop` | `notify-done.sh` | Desktop notification when a turn finishes. |
 
-Before finishing a normal public-site task, run:
+The guard parses the hook stdin JSON via a probed jq → python3 → sed chain, so
+it never fails open if an interpreter is missing or broken. Codex has no
+`PreCompact` event, so the Claude `session-summary` hook has no Codex equivalent.
 
-```powershell
-npm run cv:generate
-npm run build
-npm run privacy:check
-dotnet test tools/CvGenerator/CvGenerator.sln
-git diff --check
-```
+Hooks resolve from (closest wins): `~/.codex/hooks.json`, `~/.codex/config.toml`,
+`<repo>/.codex/hooks.json`, `<repo>/.codex/config.toml`.
 
-For private/local PDF work only:
+**Reference:** [Codex hooks docs](https://developers.openai.com/codex/hooks)
 
-```powershell
-npm run cv:generate-print
-npm run pdf:generate
-```
+---
 
-If private overlay data is missing, PDF generation may fail with a clear expected error.
+## Project config (`.codex/config.toml`)
+
+Beyond approval/sandbox, the kit's `config.toml` sets:
+
+- **`[shell_environment_policy]`** — `inherit = "all"` but `exclude` scrubs
+  `*_SECRET`/`*_TOKEN`/`*_KEY`/`*_PASSWORD`/`OPENAI_*`/`ANTHROPIC_*`/`AWS_*`/`GCP_*`
+  from subprocess env. Codex equivalent of Gemini's `advanced.excludedEnvVars`.
+- **`[history]`** — `persistence = "save-all"`, `max_bytes = 10 MiB`. Set
+  `persistence = "none"` for repos that must not persist transcripts.
+- **`[mcp_servers.<name>]`** — commented stdio + HTTP examples (GitHub,
+  filesystem, Linear). Codex's MCP config, mirroring Claude's `.mcp.json` and
+  Gemini's `settings.json` `mcpServers`. See [Codex MCP docs](https://developers.openai.com/codex/mcp).
+- **`notify`** — commented; the kit prefers the `Stop` hook form. Uncomment to
+  use the config.toml notification mechanism instead.
+
+---
+
+## Context strategy
+
+Do not read every file. Read only what is needed, in this order:
+
+1. This file.
+2. The current GitHub issue or task description.
+3. `docs/ai/PROJECT.md` when product or domain context is needed.
+4. `docs/ai/ARCHITECTURE.md` when the task touches modules, boundaries, or design.
+5. `docs/ai/COMMANDS.md` when build/test/lint commands are needed.
+6. The relevant skill (see routing below).
+7. Source files directly related to the task.
+
+Do not scan the entire repository unless the task explicitly requires it.
+
+---
+
+## Skill routing
+
+Activate the relevant skill before editing:
+
+| Task touches | Use skill |
+|---|---|
+| C#, .NET, ASP.NET, EF Core, xUnit, backend | `$dotnet` |
+| Java, Kotlin, Spring Boot, Ktor, JPA, Gradle/Maven, Android | `$java-kotlin` |
+| Python, FastAPI, Django, pytest | `$python` |
+| Node.js backend (Express, NestJS, Fastify) | `$node` |
+| Go (modules, services, CLIs) | `$go` |
+| Rust (cargo, tokio, services, CLIs) | `$rust` |
+| Angular components, services, routing, signals | `$angular` |
+| Vue components, composables, Pinia, Vite | `$vue` |
+| Svelte components, SvelteKit routes, stores, form actions | `$svelte` |
+| React, Next.js, Remix, hooks, RSC | `$react` |
+| React Native (Expo or bare RN) | `$mobile-rn` |
+| Flutter (widgets, Riverpod / BLoC, Dart) | `$mobile-flutter` |
+| SQL / NoSQL schemas, migrations, queries (any engine) | `$database` |
+| Docker, Kubernetes, Terraform, CI/CD pipelines | `$infrastructure` |
+| REST / OpenAPI contracts, versioning, error contracts, API design | `$api-design` |
+| GraphQL schemas, resolvers, dataloaders, subscriptions, codegen | `$graphql` |
+| Module boundaries, layers, DDD, CQRS, design decisions | `$architecture` |
+| Adding/updating/reviewing tests | `$testing` |
+| PR review, branch review, quality check | `$code-review` |
+| Authentication, authorization, secrets, input validation | `$security` |
+| Adding, updating, or replacing any library/package | `$dependencies` |
+| Issues, PRs, branches, commits, CI | `$github-workflow` |
+| Logs / metrics / traces / SLO / alerting | `$observability` |
+| Kafka / RabbitMQ / SQS / event-driven / outbox / idempotency | `$messaging` |
+| Retries / timeouts / circuit breakers / exception design | `$error-handling` |
+| Nx / Turborepo / pnpm-cargo-go workspaces / build caching | `$monorepo` |
+| Accessibility (WCAG, ARIA, keyboard, screen readers) | `$accessibility` |
+| Internationalization (translation, ICU, RTL, formats) | `$i18n` |
+| LLM apps, RAG, tool use, agents, prompt caching, evals | `$ai-dev` |
+| Profiling, benchmarking, query plans, Core Web Vitals, caching strategy | `$performance` |
+
+Activate only the skills relevant to the current task.
+Do not activate all skills by default.
+
+---
+
+## Subagent routing
+
+Use subagents only when the task is noisy, exploratory, or specialized:
+
+| Situation | Use subagent |
+|---|---|
+| Affected area is unclear | `codebase-investigator` |
+| Change touches more than 5 files | `code-reviewer` before final response |
+| Test output is large | `test-runner` |
+| Task affects architecture or boundaries | `architect` |
+| Change touches security-sensitive code | `security-reviewer` |
+
+Do not use subagents for simple one-file changes.
+
+---
+
+## Engineering principles
+
+- Prefer simple, explicit, consistent solutions over clever ones.
+- Keep changes small and reviewable. One concern per PR.
+- Do not over-engineer. Add abstractions only when they remove real duplication or protect a real boundary.
+- Respect layer boundaries and dependency direction at all times.
+- Avoid unrelated formatting changes.
+- Do not add dependencies without justification. **MIT license only.** Avoid library bloat — if it can be done in ~20 lines of native code, do not pull a package. See `$dependencies`.
+- Do not modify files outside the task scope.
+
+---
+
+## Proactive maintenance
+
+While working on a task, you may notice things outside the current scope that should be improved (outdated packages, deprecated APIs, runtime version upgrades).
+
+Rules:
+- **Never apply maintenance changes silently.** Always surface them first.
+- **Do not mix** maintenance changes with the current task — one concern per PR.
+- **Propose** each item explicitly: what you found, why it matters, and what the risk is.
+- **Wait for explicit approval** before touching anything outside the task scope.
+- When approved: apply the change, run builds and tests, and report what changed.
+
+Things to surface proactively (never fix without asking):
+- Packages with available updates, especially security patches.
+- Project runtime or SDK version upgradeable to a stable LTS release.
+- Deprecated API calls with drop-in replacements.
+- Transitive vulnerabilities (`dotnet list package --vulnerable`, `npm audit`, `pip-audit`, `cargo audit`, etc.).
+
+Example proposal:
+> I noticed `SomePackage` is on v3.1.0; v4.2.1 is available (patches CVE-XXXX-YYYY).
+> Shall I update it? I will run build + tests after the change.
+
+Always apply the "one concern per PR" rule — propose each maintenance item separately.
+
+---
 
 ## Git rules
 
-Do not manually edit generated files.
+- Do not push directly to `main` or `dev`.
+- Work as if changes go through a pull request.
+- Do not rewrite history on shared branches.
+- Do not run destructive Git commands without explicit approval.
+- Do not delete user work or untracked files.
 
-Do not commit:
+---
 
-- `generated/`
-- `apps/cv-web/dist/`
-- `node_modules/`
-- `bin/`
-- `obj/`
-- `.idea/`
-- `.vscode/`
-- `data/private/cv.private.yml`
-- `references/private/`
-- private PDFs or reference files.
+## Security rules
 
-## Working style
+- Never print, expose, commit, or invent secrets.
+- Do not read `.env`, secret files, or credentials unless explicitly approved.
+- Do not weaken authentication, authorization, CORS, CSRF, CSP, or rate limits.
 
-Keep changes focused and small.
+---
 
-Do not redesign unrelated areas.
+## Definition of Done
 
-Do not introduce new frameworks, services or dependencies without explicit approval.
+A task is done only when:
 
-Prefer simple, explicit and maintainable code.
+- [ ] The requested behavior is implemented.
+- [ ] The change is limited to the task scope.
+- [ ] Relevant tests/build/lint were run (or the reason they could not be run is documented).
+- [ ] New or changed behavior covered by tests. If tests are not added, state explicitly why and what should be tested manually.
+- [ ] No unrelated files were modified.
+- [ ] Risks and assumptions are clearly stated.
 
-Avoid over-engineering and premature abstractions.
+---
 
-After each task, summarize:
+## Final response format
 
-- changed files or areas;
-- commands run;
-- privacy impact;
-- assumptions;
-- remaining risks.
+Always finish with:
+
+1. **Summary** — what changed and why.
+2. **Files changed** — list with layer (Domain / Application / Infrastructure / Interfaces / UI).
+3. **Verification** — commands run and results.
+4. **Risks / assumptions** — what is uncertain or could break.
+5. **Next step** — only if genuinely useful.
+
+Keep it concise and factual.

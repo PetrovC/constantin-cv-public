@@ -9,17 +9,25 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, '..');
 const printDistDirectory = resolve(repoRoot, 'apps/cv-web/dist-print');
 const privateOverlayPath = resolve(repoRoot, 'data/private/cv.private.yml');
+const generatedPrintDirectory = resolve(repoRoot, 'generated', 'print');
 const frenchPrintRoute = ['fr', 'print'];
 const pdfOutputDirectory = resolve(repoRoot, 'generated', 'pdf', 'fr');
+const privateGenerationCommandOrder = [
+  'npm run cv:generate-print',
+  'npm run pdf:generate',
+  '.\\scripts\\admin\\prepare-private-cv-assets.ps1'
+];
 
 const pdfJobs = [
   {
     routeParts: [...frenchPrintRoute, 'one-page'],
-    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_One_Page_FR.pdf')
+    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_One_Page_FR.pdf'),
+    requiredPrintArtifactPath: resolve(generatedPrintDirectory, 'cv.fr.print.json')
   },
   {
     routeParts: [...frenchPrintRoute, 'full-dev'],
-    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_Full_Dev_FR.pdf')
+    outputPath: resolve(pdfOutputDirectory, 'CV_Constantin_Petrov_Full_Dev_FR.pdf'),
+    requiredPrintArtifactPath: resolve(generatedPrintDirectory, 'cv.fr.print.json')
   }
 ];
 
@@ -34,6 +42,7 @@ async function generatePdfs() {
   await ensurePrivateOverlayExists();
   await runNpmScript('cv:generate');
   await runNpmScript('cv:generate-print');
+  await ensureGeneratedPrintArtifactsExist();
   await runNpmScript('web:build', { CV_WEB_BUILD_MODE: 'print' });
   await ensureBuiltPrintPagesExist();
   await mkdir(pdfOutputDirectory, { recursive: true });
@@ -87,7 +96,33 @@ async function ensureBuiltPrintPagesExist() {
       [
         'Missing built print pages:',
         ...missingRoutes.map((route) => `- ${route}`),
-        'The print-mode web build did not create the expected private print pages.'
+        'The print-mode web build did not create the expected private print pages.',
+        'Run the private CV generation flow in order:',
+        ...privateGenerationCommandOrder.map((command) => `- ${command}`)
+      ].join('\n')
+    );
+  }
+}
+
+async function ensureGeneratedPrintArtifactsExist() {
+  const requiredArtifacts = [
+    ...new Set(pdfJobs.map((job) => job.requiredPrintArtifactPath))
+  ];
+  const missingArtifacts = [];
+
+  for (const artifactPath of requiredArtifacts) {
+    if (!(await exists(artifactPath))) {
+      missingArtifacts.push(artifactPath);
+    }
+  }
+
+  if (missingArtifacts.length > 0) {
+    throw new Error(
+      [
+        'Missing generated private print JSON artifact(s):',
+        ...missingArtifacts.map((artifactPath) => `- ${artifactPath}`),
+        'Run the private CV generation flow in order:',
+        ...privateGenerationCommandOrder.map((command) => `- ${command}`)
       ].join('\n')
     );
   }
@@ -110,7 +145,9 @@ async function ensurePrivateOverlayExists() {
     [
       `Missing private CV overlay: ${privateOverlayPath}`,
       'Create it by copying data/private/cv.private.example.yml to data/private/cv.private.yml.',
-      'Then replace the placeholder values with private contact details before generating PDFs.'
+      'Then replace the placeholder values with private contact details before generating PDFs.',
+      'Run the private CV generation flow in order:',
+      ...privateGenerationCommandOrder.map((command) => `- ${command}`)
     ].join('\n')
   );
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createApprovalToken, type ApprovalAction } from '../src/approvalTokens';
+import { createDeliveryToken } from '../src/deliveryTokens';
 import { createWorker } from '../src/index';
 import {
   ResendEmailSender,
@@ -22,6 +23,7 @@ const workerOrigin = 'https://cv-request-worker.example.test';
 const allowedOrigin = 'https://portfolio.example.test';
 const disallowedOrigin = 'https://not-allowed.example.test';
 const approvalTokenSecret = 'test-approval-token-secret';
+const deliveryTokenSecret = 'test-delivery-token-secret';
 const turnstileSecret = 'test-turnstile-secret';
 const adminApiToken = 'test-admin-api-token';
 const validTurnstileToken = 'test-turnstile-token';
@@ -31,6 +33,17 @@ const executionContext = {} as ExecutionContext;
 const browserAccept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 const jsonAccept = 'application/json, text/html;q=0.8';
 const adminRecentRequestsPath = '/api/admin/cv-requests/recent';
+const privateAssetPath = '/en/full-dev.pdf';
+const privateDownloadFilename = 'constantin-petrov-cv-full-dev-en.pdf';
+const privatePdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+const deliveryManifest = JSON.stringify({
+  'full-dev': {
+    en: {
+      assetPath: privateAssetPath,
+      downloadFilename: privateDownloadFilename
+    }
+  }
+});
 
 const validPayload: CvRequestPayload = {
   fullName: 'Alex Martin',
@@ -734,6 +747,7 @@ describe('cv request worker', () => {
             'request_created',
             'owner_notification_sent',
             'request_approved',
+            'cv_delivery_link_unavailable',
             'requester_notification_sent'
           ]
         }
@@ -1173,6 +1187,48 @@ describe('cv request worker', () => {
     expectOwnerActionLink(notification.actionLinks.reject, body.requestId, 'reject');
   });
 
+  it('keeps the fallback approval email text when delivery is not supplied', async () => {
+    const resendRequestBodies: BodyInit[] = [];
+    const sender = new ResendEmailSender(async (_input, init) => {
+      if (init?.body !== undefined && init.body !== null) {
+        resendRequestBodies.push(init.body);
+      }
+
+      return new Response(JSON.stringify({ id: 'email-id' }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    });
+
+    const result = await sender.sendRequesterDecisionNotification(
+      {
+        RESEND_API_KEY: 'test-resend-api-key',
+        OWNER_NOTIFICATION_FROM_EMAIL: 'cv-requests@example.com'
+      },
+      {
+        requestId: 'request-id',
+        requesterName: validPayload.fullName,
+        requesterEmail: validPayload.requesterEmail,
+        requestedCvType: validPayload.requestedCvType,
+        requestedLanguage: validPayload.requestedLanguage,
+        decision: 'approved'
+      }
+    );
+    const emailText = parseResendEmailRequestBody(resendRequestBodies[0]).text;
+
+    expect(result).toEqual({ ok: true });
+    expect(emailText).toContain(
+      'This message confirms the approval decision only. CV delivery will happen in a later follow-up step.'
+    );
+    expect(emailText).toContain(
+      'No CV file, attachment, or private download link is included in this email.'
+    );
+    expect(emailText).not.toContain('/download');
+    expect(emailText).not.toContain('token=');
+  });
+
   it('approves a pending request with a valid approve link and notifies the requester', async () => {
     const harness = createWorkerHarness();
     const { requestId, approveUrl } = await createPendingRequest(harness);
@@ -1196,14 +1252,61 @@ describe('cv request worker', () => {
     });
     expect(Date.parse(harness.db.find(requestId)?.updatedAt ?? '')).not.toBeNaN();
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'approved');
+    expect(harness.emailSender.requesterNotifications[0].notification.downloadLink).toBeUndefined();
     expectAuditEvents(harness.db, requestId, [
       'request_created',
       'owner_notification_sent',
       'request_approved',
+      'cv_delivery_link_unavailable',
       'requester_notification_sent'
     ]);
+    expect(expectAuditEventMetadata(harness.db, 'cv_delivery_link_unavailable')).toEqual({
+      failureKind: 'delivery_disabled',
+      requestedCvType: validPayload.requestedCvType,
+      requestedLanguage: validPayload.requestedLanguage
+    });
     expectAuditMetadataNotToLeakPrivateData(harness.db, {
       approvalTokens: [readActionToken(approveUrl)]
+    });
+  });
+
+  it('includes a signed download link after approval when delivery is enabled and the manifest matches', async () => {
+    const harness = createWorkerHarness({ deliveryEnabled: true });
+    const { requestId, approveUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(approveUrl, {
+      headers: {
+        accept: jsonAccept
+      }
+    });
+    const body = await response.json();
+    const notification = harness.emailSender.requesterNotifications[0].notification;
+    const downloadLink = notification.downloadLink ?? '';
+    const downloadUrl = new URL(downloadLink);
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      status: 'approved',
+      message: 'CV request approved. The requester was notified with a temporary download link.'
+    });
+    expect(downloadLink).not.toHaveLength(0);
+    expect(downloadUrl.origin).toBe(workerOrigin);
+    expect(downloadUrl.pathname).toBe(`/api/cv-requests/${requestId}/download`);
+    expect(downloadUrl.searchParams.get('token')).toEqual(expect.any(String));
+    expect(downloadUrl.searchParams.get('token')).not.toHaveLength(0);
+    expectAuditEvents(harness.db, requestId, [
+      'request_created',
+      'owner_notification_sent',
+      'request_approved',
+      'cv_delivery_link_created',
+      'requester_notification_sent'
+    ]);
+    expect(expectAuditEventMetadata(harness.db, 'cv_delivery_link_created')).toEqual({
+      requestedCvType: validPayload.requestedCvType,
+      requestedLanguage: validPayload.requestedLanguage
+    });
+    expectAuditMetadataNotToLeakPrivateData(harness.db, {
+      approvalTokens: [readActionToken(approveUrl)],
+      rawPrivateValues: [downloadUrl.searchParams.get('token') ?? '']
     });
   });
 
@@ -1244,6 +1347,7 @@ describe('cv request worker', () => {
       status: 'rejected'
     });
     expectRequesterDecisionNotification(harness.emailSender, requestId, 'rejected');
+    expect(harness.emailSender.requesterNotifications[0].notification.downloadLink).toBeUndefined();
     expectAuditEvents(harness.db, requestId, [
       'request_created',
       'owner_notification_sent',
@@ -1253,6 +1357,24 @@ describe('cv request worker', () => {
     expectAuditMetadataNotToLeakPrivateData(harness.db, {
       approvalTokens: [readActionToken(rejectUrl)]
     });
+  });
+
+  it('never includes a download link in rejection notifications when delivery is enabled', async () => {
+    const harness = createWorkerHarness({ deliveryEnabled: true });
+    const { requestId, rejectUrl } = await createPendingRequest(harness);
+    const response = await harness.fetchWorker(rejectUrl);
+    const responseText = await response.text();
+    const notification = harness.emailSender.requesterNotifications[0].notification;
+
+    expect(response.status).toBe(200);
+    expect(harness.db.find(requestId)?.status).toBe('rejected');
+    expect(notification.decision).toBe('rejected');
+    expect(notification.downloadLink).toBeUndefined();
+    expect(responseText).not.toContain('/download');
+    expect(responseText).not.toContain('token=');
+    expect(harness.db.events.map((event) => event.eventType)).not.toContain(
+      'cv_delivery_link_created'
+    );
   });
 
   it('returns a safe HTML rejection page for browser Accept headers', async () => {
@@ -1295,6 +1417,7 @@ describe('cv request worker', () => {
       'request_created',
       'owner_notification_sent',
       'request_approved',
+      'cv_delivery_link_unavailable',
       'requester_notification_failed'
     ]);
     expect(expectAuditEventMetadata(harness.db, 'requester_notification_failed')).toEqual({
@@ -1583,6 +1706,297 @@ describe('cv request worker', () => {
     });
   });
 
+  it('rejects CV downloads when the token is missing', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 40, { status: 'approved' });
+    const response = await fetchWorker(`/api/cv-requests/${request.id}/download`);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(401);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'invalid_token',
+      message: 'The download link is invalid.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'missing_token'
+    });
+  });
+
+  it('rejects CV downloads with an invalid token', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 41, { status: 'approved' });
+    const response = await fetchWorker(
+      `/api/cv-requests/${request.id}/download?token=not-a-token`
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(401);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'invalid_token',
+      message: 'The download link is invalid.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: ['not-a-token'],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'invalid_token'
+    });
+  });
+
+  it('rejects CV downloads with an expired token', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 42, { status: 'approved' });
+    const expiredToken = await createDeliveryToken({
+      requestId: request.id,
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage,
+      secret: deliveryTokenSecret,
+      now: Date.now() - 60_000,
+      ttlSeconds: 1
+    });
+    const response = await fetchWorker(
+      `/api/cv-requests/${request.id}/download?token=${expiredToken}`
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(401);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'expired_token',
+      message: 'The download link has expired.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [expiredToken],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'expired_token'
+    });
+  });
+
+  it('rejects CV downloads when the token request id mismatches the URL', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 43, { status: 'approved' });
+    const otherRequestId = '44444444-4444-4444-8444-444444444444';
+    const token = await createDeliveryToken({
+      requestId: otherRequestId,
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage,
+      secret: deliveryTokenSecret
+    });
+    const response = await fetchWorker(
+      `/api/cv-requests/${request.id}/download?token=${token}`
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'invalid_token',
+      message: 'The download link is invalid.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [token],
+      rawPrivateValues: [otherRequestId, privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'request_id_mismatch',
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage
+    });
+  });
+
+  it('rejects CV downloads when the token CV type does not match the request', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 49, { status: 'approved' });
+    const token = await createDeliveryToken({
+      requestId: request.id,
+      requestedCvType: 'one-page',
+      requestedLanguage: request.requestedLanguage,
+      secret: deliveryTokenSecret
+    });
+    const response = await fetchWorker(
+      `/api/cv-requests/${request.id}/download?token=${token}`
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'invalid_token',
+      message: 'The download link is invalid.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [token],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'token_request_mismatch',
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage
+    });
+  });
+
+  it('rejects CV downloads for non-approved requests', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 44, { status: 'pending' });
+    const downloadUrl = await createSignedDownloadUrl(request);
+    const response = await fetchWorker(downloadUrl);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'not_available',
+      message: 'The requested CV is not available.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [readDownloadToken(downloadUrl)],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'request_not_approved',
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage
+    });
+  });
+
+  it('rejects CV downloads for unknown requests', async () => {
+    const { db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const unknownRequest = {
+      ...validPayload,
+      id: '55555555-5555-4555-8555-555555555555',
+      status: 'approved',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      profileUrl: validPayload.profileUrl ?? null
+    };
+    const downloadUrl = await createSignedDownloadUrl(unknownRequest);
+    const response = await fetchWorker(downloadUrl);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'not_available',
+      message: 'The requested CV is not available.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request: unknownRequest,
+      deliveryTokens: [readDownloadToken(downloadUrl)],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'request_not_found',
+      requestedCvType: unknownRequest.requestedCvType,
+      requestedLanguage: unknownRequest.requestedLanguage
+    });
+  });
+
+  it('returns the matching PDF for a valid download token, request, status, and asset', async () => {
+    const { assets, db, fetchWorker } = createWorkerHarness({ deliveryEnabled: true });
+    const request = seedCvRequest(db, 45, { status: 'approved' });
+    const downloadUrl = await createSignedDownloadUrl(request);
+    const response = await fetchWorker(downloadUrl);
+    const bodyBytes = new Uint8Array(await response.arrayBuffer());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="${privateDownloadFilename}"`
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(bodyBytes).toEqual(privatePdfBytes);
+    expect(assets.requests.map((requestUrl) => new URL(requestUrl).pathname)).toEqual([
+      privateAssetPath
+    ]);
+    expectAuditEvents(db, request.id, [
+      'request_created',
+      'owner_notification_sent',
+      'cv_download_succeeded'
+    ]);
+    expect(expectAuditEventMetadata(db, 'cv_download_succeeded')).toEqual({
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage
+    });
+  });
+
+  it('returns a safe error when the private PDF asset is missing', async () => {
+    const { db, fetchWorker } = createWorkerHarness({
+      deliveryEnabled: true,
+      omitPrivateAsset: true
+    });
+    const request = seedCvRequest(db, 46, { status: 'approved' });
+    const downloadUrl = await createSignedDownloadUrl(request);
+    const response = await fetchWorker(downloadUrl);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'not_available',
+      message: 'The requested CV is not available.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [readDownloadToken(downloadUrl)],
+      rawPrivateValues: [privateAssetPath, privateDownloadFilename]
+    });
+    expect(expectAuditEventMetadata(db, 'cv_download_failed')).toEqual({
+      failureKind: 'asset_missing',
+      requestedCvType: request.requestedCvType,
+      requestedLanguage: request.requestedLanguage
+    });
+  });
+
+  it('keeps CV download responses free of tokens, asset internals, private data, and raw errors', async () => {
+    const { db, fetchWorker } = createWorkerHarness({
+      deliveryEnabled: true,
+      throwAssetFetch: true
+    });
+    const request = seedCvRequest(db, 47, { status: 'approved' });
+    const downloadUrl = await createSignedDownloadUrl(request);
+    const response = await fetchWorker(downloadUrl);
+    const responseText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(responseText)).toEqual({
+      status: 'service_unavailable',
+      message: 'The CV delivery service is temporarily unavailable. Try again later.'
+    });
+    expectDownloadResponseNotToLeak(responseText, {
+      request,
+      deliveryTokens: [readDownloadToken(downloadUrl)],
+      rawPrivateValues: [
+        privateAssetPath,
+        privateDownloadFilename,
+        'Raw private asset failure'
+      ]
+    });
+  });
+
+  it('keeps CV download audit writes best-effort and privacy-safe', async () => {
+    const { db, fetchWorker } = createWorkerHarness({
+      deliveryEnabled: true,
+      failAuditWrites: true
+    });
+    const request = seedCvRequest(db, 48, { status: 'approved' });
+    const downloadUrl = await createSignedDownloadUrl(request);
+    const response = await fetchWorker(downloadUrl);
+    const responseBytes = new Uint8Array(await response.arrayBuffer());
+
+    expect(response.status).toBe(200);
+    expect(responseBytes).toEqual(privatePdfBytes);
+    expect(db.events.map((event) => event.eventType)).toEqual([
+      'request_created',
+      'owner_notification_sent'
+    ]);
+  });
+
   it('returns 503 when persistence fails', async () => {
     const { db, emailSender, postCvRequest } = createWorkerHarness({ failWrites: true });
     const response = await postCvRequest(validPayload);
@@ -1856,6 +2270,11 @@ interface HarnessOptions {
   omitD1Binding?: boolean;
   omitAdminApiToken?: boolean;
   omitTurnstileSecret?: boolean;
+  deliveryEnabled?: boolean;
+  omitDeliveryTokenSecret?: boolean;
+  omitDeliveryManifest?: boolean;
+  omitPrivateAsset?: boolean;
+  throwAssetFetch?: boolean;
   cvRequestDebug?: boolean;
   cvRequestEmailDebug?: boolean;
   turnstileDebug?: boolean;
@@ -1932,6 +2351,43 @@ class FakeTurnstileVerifier implements TurnstileVerifier<Env> {
           httpStatus: 200
         }
       : { ok: true as const };
+  }
+}
+
+class FakePrivateAssets {
+  readonly requests: string[] = [];
+  private readonly assets: Map<string, Uint8Array>;
+
+  constructor(private readonly options: HarnessOptions = {}) {
+    this.assets = new Map(
+      options.omitPrivateAsset ? [] : [[privateAssetPath, privatePdfBytes]]
+    );
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    this.requests.push(request.url);
+
+    if (this.options.throwAssetFetch) {
+      throw new Error(`Raw private asset failure: ${privateAssetPath}; token=asset-internal`);
+    }
+
+    const assetBytes = this.assets.get(new URL(request.url).pathname);
+
+    if (!assetBytes) {
+      return new Response(`Missing private asset: ${privateAssetPath}`, {
+        status: 404,
+        headers: {
+          'content-type': 'text/plain'
+        }
+      });
+    }
+
+    return new Response(assetBytes, {
+      status: 200,
+      headers: {
+        'content-type': 'application/octet-stream'
+      }
+    });
   }
 }
 
@@ -2056,6 +2512,25 @@ class FakeD1Database {
       } as T;
     }
 
+    if (
+      query.startsWith(
+        'select id, status, requestedcvtype, requestedlanguage from cv_requests'
+      )
+    ) {
+      const request = this.find(String(values[0]));
+
+      if (!request) {
+        return null;
+      }
+
+      return {
+        id: request.id,
+        status: request.status,
+        requestedCvType: request.requestedCvType,
+        requestedLanguage: request.requestedLanguage
+      } as T;
+    }
+
     return null;
   }
 
@@ -2125,17 +2600,20 @@ class FakeD1Database {
 
 function createWorkerHarness(options: HarnessOptions = {}): {
   db: FakeD1Database;
+  assets: FakePrivateAssets;
   emailSender: FakeEmailSender;
   turnstileVerifier: FakeTurnstileVerifier;
   fetchWorker: (path: string, init?: RequestInit) => Promise<Response>;
   postCvRequest: (payload: unknown, init?: RequestInit) => Promise<Response>;
 } {
   const db = new FakeD1Database(options);
+  const assets = new FakePrivateAssets(options);
   const emailSender = new FakeEmailSender(options);
   const turnstileVerifier = new FakeTurnstileVerifier(options);
   const testWorker = createWorker({ emailSender, turnstileVerifier });
   const env = {
     ...(options.omitD1Binding ? {} : { CV_REQUESTS_DB: db as unknown as D1Database }),
+    CV_PRIVATE_ASSETS: assets,
     ALLOWED_ORIGINS: `${allowedOrigin}, https://secondary.example.test`,
     RESEND_API_KEY: 'test-resend-api-key',
     OWNER_NOTIFICATION_EMAIL: 'owner@example.com',
@@ -2146,7 +2624,13 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     ADMIN_API_TOKEN: options.omitAdminApiToken ? undefined : adminApiToken,
     TURNSTILE_DEBUG: options.turnstileDebug ? 'true' : undefined,
     CV_REQUEST_DEBUG: options.cvRequestDebug ? 'true' : undefined,
-    CV_REQUEST_EMAIL_DEBUG: options.cvRequestEmailDebug ? 'true' : undefined
+    CV_REQUEST_EMAIL_DEBUG: options.cvRequestEmailDebug ? 'true' : undefined,
+    CV_DELIVERY_ENABLED: options.deliveryEnabled ? 'true' : undefined,
+    CV_DELIVERY_TOKEN_SECRET: options.omitDeliveryTokenSecret
+      ? undefined
+      : deliveryTokenSecret,
+    CV_DELIVERY_LINK_TTL_SECONDS: '604800',
+    CV_DELIVERY_MANIFEST_JSON: options.omitDeliveryManifest ? undefined : deliveryManifest
   } as Env;
 
   const fetchWorker = (path: string, init?: RequestInit): Promise<Response> => {
@@ -2166,7 +2650,7 @@ function createWorkerHarness(options: HarnessOptions = {}): {
     });
   };
 
-  return { db, emailSender, turnstileVerifier, fetchWorker, postCvRequest };
+  return { db, assets, emailSender, turnstileVerifier, fetchWorker, postCvRequest };
 }
 
 function createSiteverifyWorkerHarness(
@@ -2387,6 +2871,24 @@ async function createPendingRequest({
   };
 }
 
+async function createSignedDownloadUrl(request: {
+  id: string;
+  requestedCvType: string;
+  requestedLanguage: string;
+}): Promise<string> {
+  const token = await createDeliveryToken({
+    requestId: request.id,
+    requestedCvType: request.requestedCvType,
+    requestedLanguage: request.requestedLanguage,
+    secret: deliveryTokenSecret
+  });
+  const url = new URL(`/api/cv-requests/${request.id}/download`, workerOrigin);
+
+  url.searchParams.set('token', token);
+
+  return url.toString();
+}
+
 function expectOwnerActionLink(link: string, requestId: string, action: ApprovalAction): void {
   const url = new URL(link);
 
@@ -2485,6 +2987,8 @@ function expectAuditMetadataNotToLeakPrivateData(
   expect(metadataText).not.toContain(approvalTokenSecret);
   expect(metadataText).not.toContain('approvalTokenSecret');
   expect(metadataText).not.toContain('APPROVAL_TOKEN_SECRET');
+  expect(metadataText).not.toContain(deliveryTokenSecret);
+  expect(metadataText).not.toContain('CV_DELIVERY_TOKEN_SECRET');
   expect(metadataText).not.toContain('test-resend-api-key');
   expect(metadataText).not.toContain('RESEND_API_KEY');
   expect(metadataText).not.toContain('Raw Resend');
@@ -2546,6 +3050,14 @@ function readActionToken(actionUrl: string): string {
   return token ?? '';
 }
 
+function readDownloadToken(downloadUrl: string): string {
+  const token = new URL(downloadUrl).searchParams.get('token');
+
+  expect(token).toEqual(expect.any(String));
+
+  return token ?? '';
+}
+
 function expectDecisionPageNotToLeak(
   responseText: string,
   {
@@ -2577,6 +3089,67 @@ function expectDecisionPageNotToLeak(
   for (const token of approvalTokens) {
     expect(token).not.toHaveLength(0);
     expect(responseText).not.toContain(token);
+  }
+}
+
+function expectDownloadResponseNotToLeak(
+  responseText: string,
+  {
+    request,
+    deliveryTokens = [],
+    rawPrivateValues = []
+  }: {
+    request: {
+      id: string;
+      fullName?: string;
+      requesterEmail?: string;
+      company?: string;
+      profileUrl?: string | null;
+      reason?: string;
+      requestedCvType?: string;
+      requestedLanguage?: string;
+    };
+    deliveryTokens?: string[];
+    rawPrivateValues?: string[];
+  }
+): void {
+  expectSensitiveCvRequestDataNotToLeak(responseText, validTurnstileToken);
+  expect(responseText).not.toContain(request.id);
+  expect(responseText).not.toContain('fullName');
+  expect(responseText).not.toContain('requesterEmail');
+  expect(responseText).not.toContain('company');
+  expect(responseText).not.toContain('profileUrl');
+  expect(responseText).not.toContain('requestedCvType');
+  expect(responseText).not.toContain('requestedLanguage');
+  expect(responseText).not.toContain('reason');
+  expect(responseText).not.toContain('CV_DELIVERY_TOKEN_SECRET');
+  expect(responseText).not.toContain(deliveryTokenSecret);
+  expect(responseText).not.toContain('CV_PRIVATE_ASSETS');
+  expect(responseText).not.toContain('assetPath');
+  expect(responseText).not.toContain('downloadFilename');
+  expect(responseText).not.toContain('token=');
+  expect(responseText).not.toContain('?token');
+
+  for (const field of [
+    request.fullName,
+    request.requesterEmail,
+    request.company,
+    request.profileUrl,
+    request.reason
+  ]) {
+    if (field) {
+      expect(responseText).not.toContain(field);
+    }
+  }
+
+  for (const token of deliveryTokens) {
+    expect(token).not.toHaveLength(0);
+    expect(responseText).not.toContain(token);
+  }
+
+  for (const rawPrivateValue of rawPrivateValues) {
+    expect(rawPrivateValue).not.toHaveLength(0);
+    expect(responseText).not.toContain(rawPrivateValue);
   }
 }
 

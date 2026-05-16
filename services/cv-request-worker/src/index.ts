@@ -3,6 +3,11 @@ import {
   verifyApprovalToken,
   type ApprovalAction
 } from './approvalTokens';
+import {
+  createDeliveryToken,
+  defaultDeliveryTokenTtlSeconds,
+  verifyDeliveryToken
+} from './deliveryTokens';
 import { ResendEmailSender, type EmailSendResult, type EmailSender } from './email';
 import { createInactiveRateLimiter, type RateLimiter } from './rateLimit';
 import {
@@ -12,8 +17,13 @@ import {
 } from './turnstile';
 import { validateCvRequestPayload } from './validation';
 
+interface PrivateAssetsBinding {
+  fetch(request: Request): Promise<Response>;
+}
+
 export interface Env {
   CV_REQUESTS_DB: D1Database;
+  CV_PRIVATE_ASSETS?: PrivateAssetsBinding;
   ALLOWED_ORIGINS?: string;
   RESEND_API_KEY: string;
   OWNER_NOTIFICATION_EMAIL: string;
@@ -25,6 +35,10 @@ export interface Env {
   TURNSTILE_DEBUG?: string;
   CV_REQUEST_DEBUG?: string;
   CV_REQUEST_EMAIL_DEBUG?: string;
+  CV_DELIVERY_ENABLED?: string;
+  CV_DELIVERY_TOKEN_SECRET?: string;
+  CV_DELIVERY_LINK_TTL_SECONDS?: string;
+  CV_DELIVERY_MANIFEST_JSON?: string;
 }
 
 type JsonBody =
@@ -65,6 +79,7 @@ const preflightMaxAgeSeconds = '600';
 const adminRecentCvRequestsPath = '/api/admin/cv-requests/recent';
 const defaultAdminRecentRequestsLimit = 20;
 const maxAdminRecentRequestsLimit = 50;
+const privateAssetOrigin = 'https://cv-private-assets.local';
 
 type OwnerNotificationStatus = 'sent' | 'failed';
 
@@ -82,12 +97,18 @@ type AuditEventType =
   | 'request_approved'
   | 'request_rejected'
   | 'requester_notification_sent'
-  | 'requester_notification_failed';
+  | 'requester_notification_failed'
+  | 'cv_delivery_link_created'
+  | 'cv_delivery_link_unavailable'
+  | 'cv_download_succeeded'
+  | 'cv_download_failed';
 
 interface AuditEventMetadata {
   failureKind?: string;
   httpStatus?: number;
   resendErrorName?: string;
+  requestedCvType?: string;
+  requestedLanguage?: string;
 }
 
 interface WorkerDependencies {
@@ -110,6 +131,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
     async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const approvalRoute = readApprovalRoute(url.pathname);
+      const downloadRoute = readDownloadRoute(url.pathname);
       const cors = readCorsContext(request, env);
 
       if (request.method === 'GET' && url.pathname === '/health') {
@@ -128,6 +150,10 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
         return handleAdminRecentCvRequests(request, url, env);
       }
 
+      if (request.method === 'GET' && downloadRoute) {
+        return handleCvDownload(url, env, downloadRoute);
+      }
+
       if (request.method === 'GET' && approvalRoute) {
         return handleApprovalAction(request, url, env, approvalRoute, emailSender);
       }
@@ -136,7 +162,12 @@ export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWo
         return methodNotAllowedResponse(url.pathname);
       }
 
-      if (url.pathname === '/health' || url.pathname === '/api/cv-requests' || approvalRoute) {
+      if (
+        url.pathname === '/health' ||
+        url.pathname === '/api/cv-requests' ||
+        approvalRoute ||
+        downloadRoute
+      ) {
         return methodNotAllowedResponse(url.pathname, cors);
       }
 
@@ -411,6 +442,24 @@ interface CvRequestDecisionRow {
   requestedLanguage: 'fr' | 'en' | 'de';
 }
 
+interface DownloadRoute {
+  requestId: string;
+}
+
+interface CvRequestDownloadRow {
+  id: string;
+  status: string;
+  requestedCvType: string;
+  requestedLanguage: string;
+}
+
+interface DeliveryManifestEntry {
+  assetPath: string;
+  downloadFilename: string;
+}
+
+type DeliveryManifest = Record<string, Record<string, DeliveryManifestEntry>>;
+
 interface AdminRecentCvRequestRow {
   requestId: string;
   status: string;
@@ -681,6 +730,20 @@ async function handleApprovalAction(
     route.action === 'approve' ? 'request_approved' : 'request_rejected'
   );
 
+  const deliveryLink =
+    nextStatus === 'approved'
+      ? await createRequesterDeliveryLink(request.url, env, existingRequest)
+      : undefined;
+
+  if (deliveryLink) {
+    await recordAuditEvent(
+      env,
+      route.requestId,
+      deliveryLink.auditEventType,
+      deliveryLink.auditMetadata
+    );
+  }
+
   try {
     const requesterNotificationResult = await emailSender.sendRequesterDecisionNotification(env, {
       requestId: existingRequest.id,
@@ -688,7 +751,8 @@ async function handleApprovalAction(
       requesterEmail: existingRequest.requesterEmail,
       requestedCvType: existingRequest.requestedCvType,
       requestedLanguage: existingRequest.requestedLanguage,
-      decision: nextStatus
+      decision: nextStatus,
+      ...(deliveryLink?.downloadUrl ? { downloadLink: deliveryLink.downloadUrl } : {})
     });
 
     if (!requesterNotificationResult.ok) {
@@ -715,12 +779,234 @@ async function handleApprovalAction(
       status: nextStatus,
       message:
         route.action === 'approve'
-          ? 'CV request approved. The requester was notified that CV delivery will happen in a later follow-up. No CV file or download link was sent.'
+          ? readApprovedDecisionMessage(Boolean(deliveryLink?.downloadUrl))
           : 'CV request rejected. The requester was notified.'
     },
     200,
     responseFormat
   );
+}
+
+interface DeliveryLinkResult {
+  downloadUrl?: string;
+  auditEventType: Extract<
+    AuditEventType,
+    'cv_delivery_link_created' | 'cv_delivery_link_unavailable'
+  >;
+  auditMetadata: AuditEventMetadata;
+}
+
+async function createRequesterDeliveryLink(
+  requestUrl: string,
+  env: Env,
+  cvRequest: CvRequestDecisionRow
+): Promise<DeliveryLinkResult> {
+  const auditMetadata = readDeliveryAuditMetadata(cvRequest);
+
+  try {
+    if (env.CV_DELIVERY_ENABLED !== 'true') {
+      return deliveryLinkUnavailable('delivery_disabled', auditMetadata);
+    }
+
+    const secret = readOptionalConfig(env.CV_DELIVERY_TOKEN_SECRET);
+
+    if (!secret) {
+      return deliveryLinkUnavailable('missing_token_secret', auditMetadata);
+    }
+
+    if (!env.CV_PRIVATE_ASSETS) {
+      return deliveryLinkUnavailable('missing_assets_binding', auditMetadata);
+    }
+
+    const ttlSeconds = readDeliveryLinkTtlSeconds(env.CV_DELIVERY_LINK_TTL_SECONDS);
+
+    if (!ttlSeconds.ok) {
+      return deliveryLinkUnavailable('invalid_ttl', auditMetadata);
+    }
+
+    const manifest = readDeliveryManifest(env.CV_DELIVERY_MANIFEST_JSON);
+
+    if (!manifest.ok) {
+      return deliveryLinkUnavailable(manifest.failureKind, auditMetadata);
+    }
+
+    if (!readDeliveryManifestEntry(manifest.value, cvRequest)) {
+      return deliveryLinkUnavailable('manifest_entry_missing', auditMetadata);
+    }
+
+    const token = await createDeliveryToken({
+      requestId: cvRequest.id,
+      requestedCvType: cvRequest.requestedCvType,
+      requestedLanguage: cvRequest.requestedLanguage,
+      secret,
+      ttlSeconds: ttlSeconds.value
+    });
+
+    return {
+      downloadUrl: createDownloadUrl(requestUrl, cvRequest.id, token),
+      auditEventType: 'cv_delivery_link_created',
+      auditMetadata
+    };
+  } catch {
+    return deliveryLinkUnavailable('delivery_link_exception', auditMetadata);
+  }
+}
+
+function deliveryLinkUnavailable(
+  failureKind: string,
+  auditMetadata: AuditEventMetadata
+): DeliveryLinkResult {
+  return {
+    auditEventType: 'cv_delivery_link_unavailable',
+    auditMetadata: {
+      ...auditMetadata,
+      failureKind
+    }
+  };
+}
+
+function readApprovedDecisionMessage(hasDeliveryLink: boolean): string {
+  return hasDeliveryLink
+    ? 'CV request approved. The requester was notified with a temporary download link.'
+    : 'CV request approved. The requester was notified that CV delivery will happen in a later follow-up. No CV file or download link was sent.';
+}
+
+async function handleCvDownload(
+  url: URL,
+  env: Env,
+  route: DownloadRoute
+): Promise<Response> {
+  const token = url.searchParams.get('token')?.trim();
+
+  if (!token) {
+    await recordDownloadFailure(env, route.requestId, 'missing_token');
+    return invalidDownloadLinkResponse(401);
+  }
+
+  const secret = readOptionalConfig(env.CV_DELIVERY_TOKEN_SECRET);
+
+  if (!secret) {
+    await recordDownloadFailure(env, route.requestId, 'missing_token_secret');
+    return downloadServiceUnavailableResponse();
+  }
+
+  let verification;
+
+  try {
+    verification = await verifyDeliveryToken(token, secret);
+  } catch {
+    await recordDownloadFailure(env, route.requestId, 'token_verification_exception');
+    return invalidDownloadLinkResponse(401);
+  }
+
+  if (!verification.ok) {
+    await recordDownloadFailure(
+      env,
+      route.requestId,
+      verification.reason === 'expired' ? 'expired_token' : 'invalid_token'
+    );
+
+    return verification.reason === 'expired'
+      ? expiredDownloadLinkResponse()
+      : invalidDownloadLinkResponse(401);
+  }
+
+  const tokenPayload = verification.payload;
+  const tokenAuditMetadata = readDeliveryAuditMetadata(tokenPayload);
+
+  if (tokenPayload.requestId !== route.requestId) {
+    await recordDownloadFailure(env, route.requestId, 'request_id_mismatch', tokenAuditMetadata);
+    return invalidDownloadLinkResponse(403);
+  }
+
+  if (env.CV_DELIVERY_ENABLED !== 'true') {
+    await recordDownloadFailure(env, route.requestId, 'delivery_disabled', tokenAuditMetadata);
+    return downloadServiceUnavailableResponse();
+  }
+
+  if (!env.CV_PRIVATE_ASSETS) {
+    await recordDownloadFailure(env, route.requestId, 'missing_assets_binding', tokenAuditMetadata);
+    return downloadServiceUnavailableResponse();
+  }
+
+  let existingRequest: CvRequestDownloadRow | null;
+
+  try {
+    existingRequest =
+      (await env.CV_REQUESTS_DB.prepare(
+        `SELECT id, status, requestedCvType, requestedLanguage
+         FROM cv_requests
+         WHERE id = ?`
+      )
+        .bind(route.requestId)
+        .first<CvRequestDownloadRow>()) ?? null;
+  } catch {
+    await recordDownloadFailure(env, route.requestId, 'd1_read_failed', tokenAuditMetadata);
+    return downloadServiceUnavailableResponse();
+  }
+
+  if (!existingRequest) {
+    await recordDownloadFailure(env, route.requestId, 'request_not_found', tokenAuditMetadata);
+    return downloadNotAvailableResponse(404);
+  }
+
+  if (existingRequest.status !== 'approved') {
+    await recordDownloadFailure(env, route.requestId, 'request_not_approved', {
+      requestedCvType: existingRequest.requestedCvType,
+      requestedLanguage: existingRequest.requestedLanguage
+    });
+    return downloadNotAvailableResponse(403);
+  }
+
+  if (
+    existingRequest.requestedCvType !== tokenPayload.requestedCvType ||
+    existingRequest.requestedLanguage !== tokenPayload.requestedLanguage
+  ) {
+    await recordDownloadFailure(env, route.requestId, 'token_request_mismatch', {
+      requestedCvType: existingRequest.requestedCvType,
+      requestedLanguage: existingRequest.requestedLanguage
+    });
+    return invalidDownloadLinkResponse(403);
+  }
+
+  const manifest = readDeliveryManifest(env.CV_DELIVERY_MANIFEST_JSON);
+
+  if (!manifest.ok) {
+    await recordDownloadFailure(env, route.requestId, manifest.failureKind, tokenAuditMetadata);
+    return downloadServiceUnavailableResponse();
+  }
+
+  const manifestEntry = readDeliveryManifestEntry(manifest.value, tokenPayload);
+
+  if (!manifestEntry) {
+    await recordDownloadFailure(env, route.requestId, 'manifest_entry_missing', tokenAuditMetadata);
+    return downloadNotAvailableResponse(404);
+  }
+
+  let assetResponse: Response;
+
+  try {
+    assetResponse = await env.CV_PRIVATE_ASSETS.fetch(createPrivateAssetRequest(manifestEntry));
+  } catch {
+    await recordDownloadFailure(env, route.requestId, 'asset_fetch_failed', tokenAuditMetadata);
+    return downloadServiceUnavailableResponse();
+  }
+
+  if (!assetResponse.ok || !assetResponse.body) {
+    await recordDownloadFailure(env, route.requestId, 'asset_missing', tokenAuditMetadata);
+    return downloadNotAvailableResponse(404);
+  }
+
+  await recordAuditEvent(env, route.requestId, 'cv_download_succeeded', tokenAuditMetadata);
+
+  return new Response(assetResponse.body, {
+    status: 200,
+    headers: createHeaders({
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="${manifestEntry.downloadFilename}"`,
+      'cache-control': 'no-store'
+    })
+  });
 }
 
 async function createOwnerActionLinks(
@@ -779,9 +1065,149 @@ function readApprovalRoute(pathname: string): ApprovalRoute | undefined {
   }
 }
 
+function readDownloadRoute(pathname: string): DownloadRoute | undefined {
+  const match = /^\/api\/cv-requests\/([^/]+)\/download$/u.exec(pathname);
+
+  if (!match) {
+    return undefined;
+  }
+
+  try {
+    return {
+      requestId: decodeURIComponent(match[1])
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function readChangedRowCount(result: D1Result): number | undefined {
   const changes = result.meta?.changes;
   return typeof changes === 'number' ? changes : undefined;
+}
+
+function createDownloadUrl(requestUrl: string, requestId: string, token: string): string {
+  const downloadUrl = new URL(
+    `/api/cv-requests/${encodeURIComponent(requestId)}/download`,
+    requestUrl
+  );
+  downloadUrl.searchParams.set('token', token);
+
+  return downloadUrl.toString();
+}
+
+function readDeliveryLinkTtlSeconds(
+  value: string | undefined
+): { ok: true; value: number } | { ok: false } {
+  const trimmedValue = value?.trim();
+
+  if (!trimmedValue) {
+    return { ok: true, value: defaultDeliveryTokenTtlSeconds };
+  }
+
+  if (!/^[1-9][0-9]*$/u.test(trimmedValue)) {
+    return { ok: false };
+  }
+
+  const parsedValue = Number(trimmedValue);
+
+  if (!Number.isSafeInteger(parsedValue) || parsedValue > 31_536_000) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: parsedValue };
+}
+
+function readDeliveryManifest(
+  rawManifest: string | undefined
+):
+  | { ok: true; value: DeliveryManifest }
+  | { ok: false; failureKind: 'missing_manifest' | 'invalid_manifest' } {
+  const trimmedManifest = rawManifest?.trim();
+
+  if (!trimmedManifest) {
+    return { ok: false, failureKind: 'missing_manifest' };
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(trimmedManifest);
+  } catch {
+    return { ok: false, failureKind: 'invalid_manifest' };
+  }
+
+  if (!isRecord(parsed)) {
+    return { ok: false, failureKind: 'invalid_manifest' };
+  }
+
+  const manifest: DeliveryManifest = {};
+
+  for (const [requestedCvType, languageEntries] of Object.entries(parsed)) {
+    if (!isSafeManifestKey(requestedCvType) || !isRecord(languageEntries)) {
+      return { ok: false, failureKind: 'invalid_manifest' };
+    }
+
+    manifest[requestedCvType] = {};
+
+    for (const [requestedLanguage, entry] of Object.entries(languageEntries)) {
+      if (!isSafeLanguageKey(requestedLanguage) || !isRecord(entry)) {
+        return { ok: false, failureKind: 'invalid_manifest' };
+      }
+
+      const assetPath = entry.assetPath;
+      const downloadFilename = entry.downloadFilename;
+
+      if (!isSafeAssetPath(assetPath) || !isSafeDownloadFilename(downloadFilename)) {
+        return { ok: false, failureKind: 'invalid_manifest' };
+      }
+
+      manifest[requestedCvType][requestedLanguage] = {
+        assetPath,
+        downloadFilename
+      };
+    }
+  }
+
+  return { ok: true, value: manifest };
+}
+
+function readDeliveryManifestEntry(
+  manifest: DeliveryManifest,
+  request: {
+    requestedCvType: string;
+    requestedLanguage: string;
+  }
+): DeliveryManifestEntry | undefined {
+  return manifest[request.requestedCvType]?.[request.requestedLanguage];
+}
+
+function createPrivateAssetRequest(manifestEntry: DeliveryManifestEntry): Request {
+  return new Request(new URL(manifestEntry.assetPath, privateAssetOrigin), {
+    method: 'GET'
+  });
+}
+
+function readDeliveryAuditMetadata(request: {
+  requestedCvType: string;
+  requestedLanguage: string;
+}): AuditEventMetadata {
+  return {
+    requestedCvType: request.requestedCvType,
+    requestedLanguage: request.requestedLanguage
+  };
+}
+
+async function recordDownloadFailure(
+  env: Env,
+  requestId: string,
+  failureKind: string,
+  metadata: AuditEventMetadata = {}
+): Promise<void> {
+  await recordAuditEvent(env, requestId, 'cv_download_failed', {
+    ...metadata,
+    failureKind
+  });
 }
 
 async function recordAuditEvent(
@@ -860,6 +1286,14 @@ function createAuditMetadataJson(metadata: AuditEventMetadata | undefined): stri
     /^[A-Za-z0-9._:-]{1,120}$/u.test(metadata.resendErrorName)
   ) {
     safeMetadata.resendErrorName = metadata.resendErrorName;
+  }
+
+  if (metadata.requestedCvType && /^[a-z][a-z0-9-]{0,40}$/u.test(metadata.requestedCvType)) {
+    safeMetadata.requestedCvType = metadata.requestedCvType;
+  }
+
+  if (metadata.requestedLanguage && /^[a-z]{2,8}$/u.test(metadata.requestedLanguage)) {
+    safeMetadata.requestedLanguage = metadata.requestedLanguage;
   }
 
   return Object.keys(safeMetadata).length > 0 ? JSON.stringify(safeMetadata) : null;
@@ -977,6 +1411,36 @@ function expiredApprovalLinkResponse(responseFormat: DecisionResponseFormat): Re
   );
 }
 
+function invalidDownloadLinkResponse(status: 401 | 403): Response {
+  return jsonResponse(
+    {
+      status: 'invalid_token',
+      message: 'The download link is invalid.'
+    },
+    status
+  );
+}
+
+function expiredDownloadLinkResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'expired_token',
+      message: 'The download link has expired.'
+    },
+    401
+  );
+}
+
+function downloadNotAvailableResponse(status: 403 | 404): Response {
+  return jsonResponse(
+    {
+      status: 'not_available',
+      message: 'The requested CV is not available.'
+    },
+    status
+  );
+}
+
 function alreadyFinalizedResponse(responseFormat: DecisionResponseFormat): Response {
   return decisionResponse(
     'already_finalized',
@@ -1052,6 +1516,16 @@ function adminServiceUnavailableResponse(): Response {
     {
       status: 'service_unavailable',
       message: 'The admin CV request service is temporarily unavailable. Try again later.'
+    },
+    503
+  );
+}
+
+function downloadServiceUnavailableResponse(): Response {
+  return jsonResponse(
+    {
+      status: 'service_unavailable',
+      message: 'The CV delivery service is temporarily unavailable. Try again later.'
     },
     503
   );
@@ -1328,6 +1802,41 @@ function normalizeOrigin(value: string | null | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function readOptionalConfig(value: string | undefined): string | undefined {
+  const trimmedValue = value?.trim();
+  return trimmedValue ? trimmedValue : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeManifestKey(value: string): boolean {
+  return /^[a-z][a-z0-9-]{0,40}$/u.test(value);
+}
+
+function isSafeLanguageKey(value: string): boolean {
+  return /^[a-z]{2,8}$/u.test(value);
+}
+
+function isSafeAssetPath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^\/[A-Za-z0-9/_-]+\.pdf$/u.test(value) &&
+    !value.includes('//') &&
+    !value.includes('/../') &&
+    !value.includes('/./')
+  );
+}
+
+function isSafeDownloadFilename(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[A-Za-z0-9._-]{1,160}\.pdf$/u.test(value) &&
+    !value.includes('..')
+  );
 }
 
 function isJsonContentType(contentType: string | null): boolean {

@@ -129,10 +129,12 @@ Links are single-use through the current request status: once a request is no
 longer `pending`, approval/rejection returns `409 already_finalized`.
 
 After approval or rejection is recorded, the Worker sends a requester decision
-notification through Resend. Approval notifications confirm that delivery will
-happen in a later follow-up step and do not include a CV file or private
-download link. Rejection notifications are polite and do not expose owner
-private contact data.
+notification through Resend. Approval notifications include a signed temporary
+download link only when private CV delivery is explicitly enabled and fully
+configured. When delivery is disabled or incomplete, approval notifications keep
+the fallback message that delivery will happen in a later follow-up step and no
+CV file or private download link is included. Rejection notifications are polite
+and never include a download link or owner private contact data.
 
 If owner notification sending or approval-link generation fails, the request
 remains stored and the API still returns a generic `202 Accepted` response. If
@@ -140,8 +142,9 @@ requester decision notification fails after approval or rejection, the decision
 status remains updated and the API returns a safe response explaining that the
 decision was recorded. Notification retry and audit will be handled later.
 
-It does not deliver PDFs, send the CV to requesters, attach PDFs, or create
-public/private download links.
+Delivery is disabled by default. It does not attach PDFs, store PDFs in D1,
+store PDFs in environment variables or secrets, expose Worker assets directly,
+or add public download links to the static website.
 
 Configure notification values outside source control (`PUBLIC_SITE_URL` is
 optional context for the email). `ALLOWED_ORIGINS` is a comma-separated list of
@@ -158,6 +161,7 @@ APPROVAL_TOKEN_SECRET
 TURNSTILE_SECRET_KEY
 PUBLIC_SITE_URL
 ADMIN_API_TOKEN
+CV_DELIVERY_TOKEN_SECRET
 ```
 
 The Worker exposes a protected operational endpoint for inspecting recent
@@ -244,9 +248,10 @@ npm exec --workspace services/cv-request-worker -- wrangler d1 execute cv-reques
 
 Routine audit inspection should use `cv_request_events` only. That table stores
 event type, request id, timestamp, and allowlisted metadata such as notification
-failure kind or HTTP status. It must not contain requester email, full name,
-company, reason/context, Turnstile tokens, approval tokens, secrets, raw Resend
-responses, or raw exception messages.
+failure kind, HTTP status, requested CV type, or requested language. It must not
+contain requester email, full name, company, reason/context, Turnstile tokens,
+approval tokens, delivery tokens, secrets, asset paths, raw Resend responses, or
+raw exception messages.
 
 ## Local private PDF generation
 
@@ -267,13 +272,37 @@ Then fill local private values.
 Generate private print data:
 
 ```powershell
-npm run cv:generate-print
+npm.cmd run cv:generate-print
+```
+
+This reads:
+
+```txt
+data/cv.yml
+data/private/cv.private.yml
+```
+
+and writes ignored private print JSON artifacts such as:
+
+```txt
+generated/print/cv.fr.print.json
+generated/print/cv.en.print.json
+generated/print/cv.de.print.json
 ```
 
 Generate PDFs:
 
 ```powershell
-npm run pdf:generate
+npm.cmd run pdf:generate
+```
+
+This validates that `data/private/cv.private.yml` exists, regenerates public and
+private CV artifacts, builds the French private print pages in print mode, and
+writes:
+
+```txt
+generated/pdf/fr/CV_Constantin_Petrov_One_Page_FR.pdf
+generated/pdf/fr/CV_Constantin_Petrov_Full_Dev_FR.pdf
 ```
 
 Generated PDFs stay under:
@@ -283,6 +312,75 @@ generated/pdf/
 ```
 
 They must not be committed.
+
+## Local private CV delivery assets
+
+Private CV delivery uses generated Worker static assets, not R2. The local
+asset source is:
+
+```txt
+generated/private-cv-assets/
+```
+
+That folder and the generated manifest helper file are ignored by Git. PDFs must
+never be committed.
+
+Prepare private Worker assets after private PDF generation:
+
+```powershell
+npm.cmd run cv:generate-print
+npm.cmd run pdf:generate
+.\scripts\admin\prepare-private-cv-assets.ps1
+```
+
+The script fails if the expected private PDFs are missing, copies the PDFs into
+`generated/private-cv-assets/`, writes a local manifest helper at
+`generated/private-cv-assets/manifest.json`, and prints only safe status.
+
+The prepared Worker asset paths are:
+
+```txt
+generated/private-cv-assets/fr/one-page.pdf
+generated/private-cv-assets/fr/full-dev.pdf
+generated/private-cv-assets/manifest.json
+```
+
+Configure delivery only in the Worker environment:
+
+```txt
+CV_DELIVERY_ENABLED=true
+CV_DELIVERY_LINK_TTL_SECONDS=604800
+CV_DELIVERY_MANIFEST_JSON=<contents of generated/private-cv-assets/manifest.json>
+```
+
+Configure the signing secret with Wrangler:
+
+```powershell
+npm exec --workspace services/cv-request-worker -- wrangler secret put CV_DELIVERY_TOKEN_SECRET
+```
+
+The Worker has a `CV_PRIVATE_ASSETS` assets binding with `run_worker_first` so
+private PDF assets are not served directly. They are returned only from:
+
+```txt
+GET /api/cv-requests/:id/download?token=...
+```
+
+To test a real request, deploy locally or manually after preparing assets, submit
+a request, approve it from the signed owner link, and open the requester email's
+temporary download link. A valid approved request should return a PDF attachment
+with `Cache-Control: no-store`.
+
+To disable delivery safely, set:
+
+```txt
+CV_DELIVERY_ENABLED=false
+```
+
+or remove `CV_DELIVERY_TOKEN_SECRET`. Existing approval emails will return to the
+fallback message and no new download links will be generated.
+
+See `docs/private-cv-delivery.md` for the full delivery runbook.
 
 ## Public CI
 
