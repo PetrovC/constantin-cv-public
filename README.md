@@ -34,7 +34,7 @@ The project currently includes:
 - a multilingual CV YAML source of truth (`data/cv.yml`);
 - a .NET (Clean Architecture) generator producing public web JSON and private print JSON;
 - a multilingual Astro public website (fr/en/de) deployed to GitHub Pages;
-- Playwright-based PDF generation for private CV variants;
+- .NET/QuestPDF generation of the private CV PDF variants;
 - a Cloudflare Worker backend (D1 + Resend) handling CV access requests;
 - CI/CD via GitHub Actions (PR checks + Pages deploy) with a public-privacy gate.
 

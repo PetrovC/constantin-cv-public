@@ -64,19 +64,13 @@ It must never expose:
 - raw email;
 - encoded mailto containing the real email;
 - precise private location;
-- private print routes.
+- private CV PDFs.
 
 ## Private print data
 
-Private print JSON lives under:
-
-```txt
-generated/print/
-```
-
-It may contain private contact data only for local/private PDF generation.
-
-It must stay ignored by Git.
+The private print model (with private contact data) exists only in memory
+during PDF generation. No private print JSON artifact is written to disk and
+nothing under `generated/print/` is produced anymore.
 
 ## Generated PDFs
 
@@ -94,14 +88,9 @@ They should not be publicly deployed unless intentionally reviewed and approved.
 
 ## Public build
 
-The normal public build must not output private print routes such as:
-
-```txt
-/fr/print/one-page/
-/fr/print/full-dev/
-```
-
-Print routes are only for local/private PDF generation mode.
+The web app no longer contains any print pages or print routes. Private CV
+rendering is fully handled by the .NET `CvGenerator.Pdf` (QuestPDF) generator
+and never touches the public Astro build.
 
 ## Privacy check
 

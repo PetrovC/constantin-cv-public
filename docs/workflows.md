@@ -269,10 +269,10 @@ Copy-Item data/private/cv.private.example.yml data/private/cv.private.yml
 
 Then fill local private values.
 
-Generate private print data:
+Generate the private PDFs:
 
 ```powershell
-npm.cmd run cv:generate-print
+npm.cmd run pdf:generate
 ```
 
 This reads:
@@ -282,23 +282,9 @@ data/cv.yml
 data/private/cv.private.yml
 ```
 
-and writes ignored private print JSON artifacts such as:
-
-```txt
-generated/print/cv.fr.print.json
-generated/print/cv.en.print.json
-generated/print/cv.de.print.json
-```
-
-Generate PDFs:
-
-```powershell
-npm.cmd run pdf:generate
-```
-
-This validates that `data/private/cv.private.yml` exists, regenerates public and
-private CV artifacts, builds the French private print pages in print mode, and
-writes:
+applies the private overlay, builds the print model in memory, and renders the
+French CV PDFs with QuestPDF (`CvGenerator.Pdf` — no browser, no Astro print
+build) to:
 
 ```txt
 generated/pdf/fr/CV_Constantin_Petrov_One_Page_FR.pdf
@@ -328,7 +314,6 @@ never be committed.
 Prepare private Worker assets after private PDF generation:
 
 ```powershell
-npm.cmd run cv:generate-print
 npm.cmd run pdf:generate
 .\scripts\admin\prepare-private-cv-assets.ps1
 ```
