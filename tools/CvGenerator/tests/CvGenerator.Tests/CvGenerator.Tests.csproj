@@ -4,6 +4,7 @@
     <ProjectReference Include="..\..\src\CvGenerator.Domain\CvGenerator.Domain.csproj" />
     <ProjectReference Include="..\..\src\CvGenerator.Application\CvGenerator.Application.csproj" />
     <ProjectReference Include="..\..\src\CvGenerator.Infrastructure\CvGenerator.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CvGenerator.Pdf\CvGenerator.Pdf.csproj" />
   </ItemGroup>
 
   <ItemGroup>
