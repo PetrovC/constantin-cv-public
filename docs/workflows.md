@@ -322,6 +322,19 @@ The script fails if the expected private PDFs are missing, copies the PDFs into
 `generated/private-cv-assets/`, writes a local manifest helper at
 `generated/private-cv-assets/manifest.json`, and prints only safe status.
 
+### One-command local release
+
+The full private release (PDF generation, asset preparation, remote D1
+migrations, Worker deploy) runs as a single local command:
+
+```powershell
+npm run api:release
+```
+
+This stays local by design: the private PDFs are generated from
+`data/private/cv.private.yml` and must never pass through CI on a public
+repository. The public site (GitHub Pages) is deployed separately by CI.
+
 The prepared Worker asset paths are:
 
 ```txt
