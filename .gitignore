@@ -1,5 +1,8 @@
 # Generated artifacts
 generated/
+generated/print/
+generated/pdf/
+generated/private-cv-assets/
 apps/cv-web/dist/
 apps/cv-web/dist-print/
 
@@ -49,3 +52,20 @@ Thumbs.db
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
+
+# AI
+
+.claude/
+.gemini/
+.agents/
+.codex/
+docs/
+
+GEMINI.md
+CLAUDE.md
+AGENTS.md
+.geminiignore
+.kit-version
+.mcp.example.jsonc
+.mcp.json
+

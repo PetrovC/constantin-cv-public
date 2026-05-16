@@ -27,6 +27,7 @@ export interface RequesterDecisionEmail {
   requestedCvType: CvRequestPayload['requestedCvType'];
   requestedLanguage: CvRequestPayload['requestedLanguage'];
   decision: RequesterDecision;
+  downloadLink?: string;
 }
 
 export type EmailSendFailureKind =
@@ -204,6 +205,21 @@ function buildOwnerNotificationText(
 
 function buildRequesterDecisionText(notification: RequesterDecisionEmail): string {
   if (notification.decision === 'approved') {
+    if (notification.downloadLink) {
+      return [
+        `Hello ${notification.requesterName},`,
+        '',
+        `Your request for Constantin Petrov's ${notification.requestedCvType} CV in ${notification.requestedLanguage} has been approved.`,
+        '',
+        'Download link:',
+        notification.downloadLink,
+        '',
+        'This link is temporary and should not be forwarded.',
+        '',
+        'Thank you.'
+      ].join('\n');
+    }
+
     return [
       `Hello ${notification.requesterName},`,
       '',

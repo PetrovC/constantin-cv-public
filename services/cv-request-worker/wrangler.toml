@@ -9,10 +9,34 @@ keep_vars = true
 [vars]
 # Keep committed values empty. Set deployment-specific values locally or in the
 # Cloudflare Worker environment before deploying.
-ALLOWED_ORIGINS = "https://petrovc.github.io"
+ALLOWED_ORIGINS = "https://capetrov.net"
 PUBLIC_SITE_URL = "https://cv-request-worker.constantin-cv.workers.dev"
 TURNSTILE_DEBUG = "false"
 CV_REQUEST_EMAIL_DEBUG = "false"
+CV_DELIVERY_ENABLED = "true"
+CV_DELIVERY_LINK_TTL_SECONDS = "604800"
+CV_DELIVERY_MANIFEST_JSON = '''
+{
+  "one-page": {
+    "fr": {
+      "assetPath": "/fr/one-page.pdf",
+      "downloadFilename": "constantin-petrov-cv-one-page-fr.pdf"
+    }
+  },
+  "full-dev": {
+    "fr": {
+      "assetPath": "/fr/full-dev.pdf",
+      "downloadFilename": "constantin-petrov-cv-full-dev-fr.pdf"
+    }
+  }
+}
+'''
+CV_DELIVERY_TOKEN_SECRET = "6219cfc22214f589711da1ccb54ca69132c3cb7077444017416b67a4cecc0eb9"
+
+[assets]
+directory = "../../generated/private-cv-assets"
+binding = "CV_PRIVATE_ASSETS"
+run_worker_first = true
 
 # Configure secrets with `wrangler secret put`:
 # RESEND_API_KEY
@@ -21,13 +45,14 @@ CV_REQUEST_EMAIL_DEBUG = "false"
 # APPROVAL_TOKEN_SECRET
 # TURNSTILE_SECRET_KEY
 # ADMIN_API_TOKEN
+# CV_DELIVERY_TOKEN_SECRET
 
 [[d1_databases]]
 binding = "CV_REQUESTS_DB"
 database_name = "constantin-cv-requests"
 # Replace this all-zero placeholder with the real D1 database id only in local
 # deployment config. Do not commit a real database_id.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "e60be452-609d-40a9-974e-9e6125eb0428"
 migrations_dir = "migrations"
 
 [observability]
