@@ -52,9 +52,11 @@ run_worker_first = true
 [[d1_databases]]
 binding = "CV_REQUESTS_DB"
 database_name = "constantin-cv-requests"
-# Replace this all-zero placeholder with the real D1 database id only in local
-# deployment config. Do not commit a real database_id.
-database_id = "00000000-0000-0000-0000-000000000000"
+# A D1 database_id is an account-scoped identifier, not a credential: it is
+# useless without a valid Cloudflare API token for this account, so it is safe
+# to commit. The real secret (CV_DELIVERY_TOKEN_SECRET) stays out, set via
+# `wrangler secret put`.
+database_id = "e60be452-609d-40a9-974e-9e6125eb0428"
 migrations_dir = "migrations"
 
 [observability]

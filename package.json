@@ -11,6 +11,7 @@
     "api:dev": "npm run dev --workspace services/cv-request-worker",
     "api:migrate:local": "npm run db:migrate:local --workspace services/cv-request-worker",
     "api:migrate:remote": "npm run db:migrate:remote --workspace services/cv-request-worker",
+    "api:release": "npm run pdf:generate && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/admin/prepare-private-cv-assets.ps1 && npm run api:migrate:remote && npm run api:deploy",
     "api:test": "npm run test --workspace services/cv-request-worker",
     "build:all": "npm run build && npm run pdf:generate",
     "build": "npm run cv:generate && npm run web:build",
