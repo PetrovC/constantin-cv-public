@@ -9,7 +9,7 @@ import {
   verifyDeliveryToken
 } from './deliveryTokens';
 import { ResendEmailSender, type EmailSendResult, type EmailSender } from './email';
-import { createInactiveRateLimiter, type RateLimiter } from './rateLimit';
+import { createD1RateLimiter, type RateLimiter } from './rateLimit';
 import {
   CloudflareTurnstileVerifier,
   type TurnstileVerificationResult,
@@ -123,7 +123,7 @@ interface CvRequestWorker {
 
 export function createWorker(dependencies: WorkerDependencies = {}): CvRequestWorker {
   const emailSender = dependencies.emailSender ?? new ResendEmailSender();
-  const rateLimiter = dependencies.rateLimiter ?? createInactiveRateLimiter<Env>();
+  const rateLimiter = dependencies.rateLimiter ?? createD1RateLimiter<Env>();
   const turnstileVerifier =
     dependencies.turnstileVerifier ?? new CloudflareTurnstileVerifier<Env>();
 
