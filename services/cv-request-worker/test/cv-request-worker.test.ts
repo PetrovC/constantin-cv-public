@@ -4,6 +4,11 @@ import { createApprovalToken, type ApprovalAction } from '../src/approvalTokens'
 import { createDeliveryToken } from '../src/deliveryTokens';
 import { createWorker } from '../src/index';
 import {
+  createD1RateLimiter,
+  createInactiveRateLimiter,
+  type RateLimitDecision
+} from '../src/rateLimit';
+import {
   ResendEmailSender,
   type EmailEnv,
   type EmailSender,
@@ -2610,7 +2615,11 @@ function createWorkerHarness(options: HarnessOptions = {}): {
   const assets = new FakePrivateAssets(options);
   const emailSender = new FakeEmailSender(options);
   const turnstileVerifier = new FakeTurnstileVerifier(options);
-  const testWorker = createWorker({ emailSender, turnstileVerifier });
+  const testWorker = createWorker({
+    emailSender,
+    turnstileVerifier,
+    rateLimiter: createInactiveRateLimiter()
+  });
   const env = {
     ...(options.omitD1Binding ? {} : { CV_REQUESTS_DB: db as unknown as D1Database }),
     CV_PRIVATE_ASSETS: assets,
@@ -2666,7 +2675,8 @@ function createSiteverifyWorkerHarness(
   const emailSender = new FakeEmailSender(options);
   const testWorker = createWorker({
     emailSender,
-    turnstileVerifier: new CloudflareTurnstileVerifier(fetcher)
+    turnstileVerifier: new CloudflareTurnstileVerifier(fetcher),
+    rateLimiter: createInactiveRateLimiter()
   });
   const env: Env = {
     CV_REQUESTS_DB: db as unknown as D1Database,
@@ -2713,7 +2723,8 @@ function createResendWorkerHarness(
   const turnstileVerifier = new FakeTurnstileVerifier(options);
   const testWorker = createWorker({
     emailSender: new ResendEmailSender(fetcher),
-    turnstileVerifier
+    turnstileVerifier,
+    rateLimiter: createInactiveRateLimiter()
   });
   const env = {
     ...(options.omitD1Binding ? {} : { CV_REQUESTS_DB: db as unknown as D1Database }),
@@ -3386,4 +3397,166 @@ function isValidationErrorBody(body: unknown): body is {
     'errors' in body &&
     Array.isArray((body as { errors?: unknown }).errors)
   );
+}
+
+describe('cv request rate limiter (D1)', () => {
+  const limiterEnv = (db: unknown): { CV_REQUESTS_DB?: D1Database } => ({
+    CV_REQUESTS_DB: db as D1Database
+  });
+
+  const requestFrom = (ip?: string): Request =>
+    new Request(`${workerOrigin}/api/cv-requests`, {
+      method: 'POST',
+      headers: ip ? { 'cf-connecting-ip': ip } : {}
+    });
+
+  it('allows requests up to the limit then denies within the window', async () => {
+    let clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const limiter = createD1RateLimiter({
+      windowSeconds: 60,
+      maxRequests: 3,
+      now: () => clock
+    });
+    const env = limiterEnv(createRateLimitDb());
+    const request = requestFrom('203.0.113.5');
+    const decisions: RateLimitDecision[] = [];
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      decisions.push(await limiter.check(request, env));
+      clock += 1000;
+    }
+
+    expect(decisions.slice(0, 3).every((decision) => decision.allowed)).toBe(true);
+    expect(decisions[3].allowed).toBe(false);
+
+    if (!decisions[3].allowed) {
+      expect(decisions[3].retryAfterSeconds).toBeGreaterThan(0);
+      expect(decisions[3].retryAfterSeconds).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it('resets the window once it has elapsed', async () => {
+    let clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const limiter = createD1RateLimiter({
+      windowSeconds: 60,
+      maxRequests: 2,
+      now: () => clock
+    });
+    const env = limiterEnv(createRateLimitDb());
+    const request = requestFrom('203.0.113.6');
+
+    await limiter.check(request, env);
+    await limiter.check(request, env);
+    const blocked = await limiter.check(request, env);
+    clock += 61_000;
+    const afterWindow = await limiter.check(request, env);
+
+    expect(blocked.allowed).toBe(false);
+    expect(afterWindow.allowed).toBe(true);
+  });
+
+  it('tracks distinct client IPs independently', async () => {
+    const clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const limiter = createD1RateLimiter({
+      windowSeconds: 60,
+      maxRequests: 1,
+      now: () => clock
+    });
+    const env = limiterEnv(createRateLimitDb());
+
+    const first = await limiter.check(requestFrom('203.0.113.7'), env);
+    const second = await limiter.check(requestFrom('203.0.113.8'), env);
+    const firstAgain = await limiter.check(requestFrom('203.0.113.7'), env);
+
+    expect(first.allowed).toBe(true);
+    expect(second.allowed).toBe(true);
+    expect(firstAgain.allowed).toBe(false);
+  });
+
+  it('fails open when the database throws', async () => {
+    const limiter = createD1RateLimiter({ maxRequests: 1 });
+    const throwingDb = {
+      prepare: (): never => {
+        throw new Error('D1 unavailable');
+      }
+    };
+
+    const decision = await limiter.check(
+      requestFrom('203.0.113.9'),
+      limiterEnv(throwingDb)
+    );
+
+    expect(decision.allowed).toBe(true);
+  });
+
+  it('allows the request when no database binding is configured', async () => {
+    const limiter = createD1RateLimiter();
+
+    const decision = await limiter.check(requestFrom('203.0.113.10'), {});
+
+    expect(decision.allowed).toBe(true);
+  });
+});
+
+function createRateLimitDb(): {
+  prepare: (query: string) => {
+    bind: (...values: unknown[]) => {
+      run: () => Promise<unknown>;
+      first: <T>() => Promise<T>;
+    };
+  };
+} {
+  const rows = new Map<string, { windowStartedAt: string; requestCount: number }>();
+
+  const exec = (rawQuery: string, values: unknown[]): unknown => {
+    const query = rawQuery.replace(/\s+/gu, ' ').trim().toLowerCase();
+
+    if (query.startsWith('delete from cv_request_rate_limits')) {
+      const cutoff = String(values[0]);
+
+      for (const [key, row] of rows) {
+        if (row.windowStartedAt < cutoff) {
+          rows.delete(key);
+        }
+      }
+
+      return null;
+    }
+
+    if (query.startsWith('select')) {
+      return rows.get(String(values[0])) ?? null;
+    }
+
+    if (query.startsWith('insert into cv_request_rate_limits')) {
+      rows.set(String(values[0]), {
+        windowStartedAt: String(values[1]),
+        requestCount: 1
+      });
+
+      return null;
+    }
+
+    if (query.startsWith('update cv_request_rate_limits')) {
+      const row = rows.get(String(values[0]));
+
+      if (row) {
+        row.requestCount += 1;
+      }
+
+      return null;
+    }
+
+    throw new Error(`Unexpected rate-limit query: ${query}`);
+  };
+
+  return {
+    prepare(query: string) {
+      return {
+        bind: (...values: unknown[]) => ({
+          run: async () => exec(query, values),
+          first: async <T>() => exec(query, values) as T
+        })
+      };
+    }
+  };
 }
