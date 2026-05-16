@@ -4,7 +4,6 @@ generated/print/
 generated/pdf/
 generated/private-cv-assets/
 apps/cv-web/dist/
-apps/cv-web/dist-print/
 
 # Private CV data and source references
 data/private/cv.private.yml
